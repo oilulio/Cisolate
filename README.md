@@ -16,6 +16,12 @@ well developed.
 
 Details are available at https://oilulio.wordpress.com/2016/01/02/cisolate-pcb-construction/
 
+Hints and Tips
+
+The largeExample.bmp needs more than the default 20 iterations to fully optimise drill paths, try 120.
+
+Starting the jar from the command line (java -jar Cisolate.java) provides useful progress disgnostics in the console.
+
 Coding Style
 
 I am a believer in compact code.  This makes fitting a concept on a single printed 
