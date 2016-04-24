@@ -23,16 +23,21 @@ sheet, or within a window, possible, which for me makes understanding the code
 much easier that a page that is mostly whitespece and closing braces.  Sometimes 
 this means I prefer the format:
 
-  if (X) 
-    do Y;
- 
+```C
+if (X)    
+  do Y;
+```
 over
 
-  if (X) {
-    do Y; 
-  }  
-
-although sometimes (if Y is compact) it makes more sense to have   if (X) { do Y; } 
+```C
+if (X) {  
+    do Y;  
+}  
+```
+although sometimes (if Y is compact) it makes more sense to have   
+```C
+if (X) { do Y; } 
+```
 
 Hence be alert for single line if statements, with no braces.  
 
@@ -41,13 +46,16 @@ similar concepts.
 
 For example, I find this ...
 
+```C
 // Wait for the milling optimisation to finish - we're stuck without it
 try { {}  while (tspDoneFuture.get()!=null); }
 catch (InterruptedException e) { System.out.println("TSP Int ERROR ****");  e.printStackTrace(); }
 catch (ExecutionException e)   { System.out.println("TSP Exec ERROR ****"); e.printStackTrace(); }
+```
 
 ... far more useful than this :
 
+```C
 // Wait for the milling optimisation to finish - we're stuck without it
 try { 
   {
@@ -61,3 +69,4 @@ catch (ExecutionException e)   {
   System.out.println("TSP Exec ERROR ****"); 
   e.printStackTrace(); 
 }
+```
