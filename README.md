@@ -17,7 +17,7 @@ well developed.
 
 Details are available at https://oilulio.wordpress.com/2016/01/02/cisolate-pcb-construction/
 
-<b>Hints and Tips<b>
+<b>Hints and Tips</b>
 
 The largeExample.bmp needs more than the default 20 iterations to fully optimise drill paths, try 120.
 
