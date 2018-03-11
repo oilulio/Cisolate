@@ -1,3 +1,5 @@
+
+
 # Cisolate
 A PCB trace isolation program using Cellular Automata 
 (an alternative to Visolate)
@@ -27,16 +29,19 @@ in the console as well as those seen in the GUI.
 Once processing has started on a board, other tabs (initially greyed out) become selectable as the
 different elements of the analysis complete.
 
+Note : The provided jar files for v2.0 are compiled for Java 1.7, and should 
+run on that and later JVMs.
+
 <b>Instructions</b>
 
 With suitable permissions, jar file can be clicked on to run GUI.  Alternatively type :
 java -jar Cisloate.jar, which starts GUI but also prints command line instructions.
 
 In GUI, initially select a file to open (.bmp or .jpg); select maximum number of processors to use (default
-is all); select optimisation iterations for Drill and Mill paths respectively (Default 20); select (via
-Create menu) what files should be produced (e.g. G-Code); select (Optimisations menu) which
-optimisations should be run; and confirm (Settings) whether copper traces are black or white in the image.
-Then press 'Start Processing'.  May take minutes to complete processing, dependent on processor type and
+is all); select optimisation replications (Settings-Replications) for Drill and Mill paths respectively (Default 20); 
+select (via Settings-Create menu) what files should be produced (e.g. G-Code); select (Settings-Optimisations 
+menu) which optimisations should be run; and confirm (Settings-Image) whether copper traces are black or white
+in the image.  Then press 'Start Processing'.  May take minutes to complete processing, dependent on processor type and
 board size.  Results appear as they are calculated.
 
 <b>Coding Style</b>
@@ -71,28 +76,18 @@ Extensive use of vertical alignment is also intended to make code clearer by lin
 similar concepts.
 
 For example, I find this ...
-
 ```C
-// Wait for the milling optimisation to finish - we're stuck without it
-try { {}  while (tspDoneFuture.get()!=null); }
-catch (InterruptedException e) { System.out.println("TSP Int ERROR ****");  e.printStackTrace(); }
-catch (ExecutionException e)   { System.out.println("TSP Exec ERROR ****"); e.printStackTrace(); }
+
+  if      (binaryImg[x][y-1])   {       y-=1; trace.add(new Point2D(x,y)); } // N
+  else if (binaryImg[x+1][y])   { x+=1;       trace.add(new Point2D(x,y)); } // E
+  else if (binaryImg[x][y+1])   {       y+=1; trace.add(new Point2D(x,y)); } // S
+  else if (binaryImg[x-1][y])   { x-=1;       trace.add(new Point2D(x,y)); } // W
+  else if (binaryImg[x+1][y-1]) { x+=1; y-=1; trace.add(new Point2D(x,y)); } // NE
+  else if (binaryImg[x+1][y+1]) { x+=1; y+=1; trace.add(new Point2D(x,y)); } // SE
+  else if (binaryImg[x-1][y+1]) { x-=1; y+=1; trace.add(new Point2D(x,y)); } // SW
+  else if (binaryImg[x-1][y-1]) { x-=1; y-=1; trace.add(new Point2D(x,y)); } // NW
+  else break; // end of the line : space all around us
 ```
 
-... far more useful than this :
-
-```C
-// Wait for the milling optimisation to finish - we're stuck without it
-try { 
-  {
-  } while (tspDoneFuture.get()!=null); 
-}
-catch (InterruptedException e) {
-  System.out.println("TSP Int ERROR ****");  
-  e.printStackTrace(); 
-}
-catch (ExecutionException e)   {
-  System.out.println("TSP Exec ERROR ****"); 
-  e.printStackTrace(); 
-}
-```
+... far easier to understand and to check for errors than something spread over 
+three pages which is mostly braces.
