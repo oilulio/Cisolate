@@ -20,8 +20,8 @@ package cisolate;
 
 class Point2D {  // Simple class representing a point in 2D space, i.e. (x,y)
 
-private int x;
-private int y;
+private final int x;
+private final int y;
 
 Point2D(int x,int y)  {   this.x=x;    this.y=y;  }
 
@@ -31,4 +31,6 @@ public int getX() { return x; }
 public int getY() { return y; }
 public boolean equals(Point2D pt) 
     { return (this.x==pt.getX() && this.y==pt.getY()); }
+public boolean equals(int x,int y) 
+    { return (this.x==x && this.y==y); }
 }

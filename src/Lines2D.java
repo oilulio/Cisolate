@@ -16,17 +16,13 @@ Copyright (C) 2016  S Combes
 
 */
 package cisolate;
-import java.util.List;
-import java.util.ArrayList;
-import java.util.Iterator;
 
 class Lines2D extends Points2D  {
 
-Lines2D()  {  super();  }
-
-Lines2D(Points2D p2d) { super(); this.points=p2d.points; }
-
 PathPairOrder optimum; // Deliberate override
+
+Lines2D()             { super(); }
+Lines2D(Points2D p2d) { super(); this.points=p2d.points; }
 
 //@Override
 public double score(PathPairOrder ppo) 

@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2016  S Combes
+Copyright (C) 2016-2018  S Combes
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,12 +16,9 @@ Copyright (C) 2016  S Combes
 
 */
 package cisolate;
-import java.awt.*;
-import javax.swing.*;
 import java.awt.image.*; 
 import java.io.*; 
 import java.util.Date;
-import java.lang.Thread;
 import java.util.concurrent.*;
 import java.util.List;
 import java.util.ArrayList;
@@ -36,7 +33,7 @@ class Skeleton {
 // On construction, takes a binary image of a PCB (boolean, true when copper is absent) 
 // and thins that image to a skeleton based on the even thinning of the non-copper
 // elements (creates a Cellular Automaton to do this in PCBCellEvolve).  Identifies
-// the points that are drill points and vetrices that are 3- or 4-way (pixel nature 
+// the points that are drill points and vertices that are 3- or 4-way (pixel nature 
 // precludes more than 4-way junctions)
 
 // Removes any dead ends - i.e. 'skeleton' consists of closed loops because only
@@ -56,7 +53,7 @@ private int pass=0;
 private final int width;
 private final int height;
 private boolean [][] binaryImg;
-protected volatile boolean stop = false;
+//protected volatile boolean stop = false;
 
 public BufferedImage boardimg;
 protected List<Route2D> routes;
@@ -76,7 +73,11 @@ static final int[] threes={0x1a , 0x32 , 0x31 , 0x25 , 0x35 , 0x33 , 0x3a ,
 // Counting from top left in 'book' order they are MSb (7) to LSb (0), 
 // skipping the middle pixel (the one being assessed).
 
-Skeleton(boolean [][] bimg,ExecutorService pool) {
+// Hence pattern in bit numbers is :   7 | 6 | 5
+//                                     4 | x | 3
+//                                     2 | 1 | 0
+
+Skeleton(boolean [][] bimg,ExecutorService pool,Board board) {
 
 this.binaryImg=bimg;
 
@@ -91,11 +92,12 @@ int [] rgbs=new int[9];
 
 System.out.println("Thinning starting "+new Date());
 
-int SWATH=640; // Arbitrary - large enough for low overhead, small enough to balance
+int SWATH=640; // Arbitrary - large enough for low overhead, small enough to 
+// balance tasks on different processors.  Likely multiple of image size.
 
 for (pass=0;true;pass++) {
 
-  if (stop) return;
+  if (board.stop) return;
 
   if ((pass-last_change) > 2) break; // All done when nothing changes for 2 gens
 
@@ -104,9 +106,9 @@ for (pass=0;true;pass++) {
   // Farm out vertical swathes queued on different processors 
   ArrayList<Future<Boolean>> changes = new ArrayList<Future<Boolean>>();  
 
-  for (int i=1;i<width;i+=SWATH) { // Start @ 1, cells have surround
+  for (int i=1;i<width;i+=SWATH) { // Start @ 1, cells have implied surround
     int iend=i+SWATH;
-    if (iend>(width-1)) iend=width-1; // End @ -1, ditto
+    if (iend>(width-1)) iend=width-1; 
     boolean even=((pass%2)==0);
     changes.add(pool.submit(
       new PcbCellEvolve(even,binaryImg,nextBimg,lasttouch,i,iend,pass)));
@@ -117,15 +119,19 @@ for (pass=0;true;pass++) {
       if (changes.get(i).get()) last_change=pass; // Blocks until done.
   } // Not the prettiest exception handling
   catch (InterruptedException e) { System.out.println("Skeleton Int ERROR **** "+e); System.exit(0); }
-  catch (ExecutionException e)   { System.out.println("Skeleton Exec ERROR **** "+e); System.exit(0); } 
+  catch (ExecutionException e)   { System.out.println("Skeleton Exec ERROR **** "+e);e.printStackTrace();  System.exit(0); } 
 
   binaryImg=nextBimg;
 
+  /* For animation
   BufferedImage b = new BufferedImage(width, 
         height, BufferedImage.TYPE_3BYTE_BGR);
-
+  writeBimg(b);
+  // end animation */
+        
   if ((pass%10)==0) System.out.print("\nGENERATION : "+pass+" "+new Date());
   else              System.out.print(" .");
+  board.gen.setText(String.format("Automata generation %d",(pass+1)));
 }
 pass=DONE;
 // ------------------------------------------------------------
@@ -145,7 +151,7 @@ threeWays=new Points2D();
 fourWays =new Points2D();
 
 for (int y=1;y<(height-1);y++) { 
-  if (stop) return;
+  if (board.stop) return;
 
   for (int x=1;x<(width-1);x++) {      
     if (binaryImg[x][y]) { 
@@ -160,23 +166,28 @@ for (int y=1;y<(height-1);y++) {
 
 routes = new ArrayList<Route2D>();
 
-for (Point2D point : threeWays) 
+for (Point2D point : threeWays) {
+  if (board.stop) return;
+
   for (int j=0;j<3;j++) { // Worst case - rip all 3 lines from a 3-way junction
     Route2D route=ripLine(point);
     if (route.size()>1) routes.add(route);
   }
-
-for (Point2D point : fourWays) 
+}
+for (Point2D point : fourWays) {
+  if (board.stop) return;
   for (int j=0;j<4;j++) { // Worst case - rip all 4 lines from a 4-way junction
     Route2D route=ripLine(point);
     if (route.size()>1) routes.add(route);
   }
-
+}
 // Finding remaining closed-loops;
 // Usually only an outer circuit as inner loops collapse to points
 
 routes0w=0;
 for (int y=1;y<(height-1);y++) { 
+if (board.stop) return;
+
   for (int x=1;x<(width-1);x++) {      
     if (binaryImg[x][y]) { 
         Route2D route=ripLine(new Point2D(x,y));
@@ -190,10 +201,7 @@ for (int y=1;y<(height-1);y++) {
 transits=new Lines2D(endPairs());  // For mill route optimisation
 }
 // ------------------------------------------------------------------------
-public void gracefulExit() { stop=true; 
-System.out.println("STOP REQUESTED ********************");}
-// ---------------------------------------------------------------
-public Points2D endPairs() 
+public final Points2D endPairs() 
 {
 // Make paired route for Travelling Salesman optimisation.  Optimiser 
 // only needs to know starts and ends (because the route itself isn't 
@@ -241,7 +249,7 @@ while (true) {
   else if (binaryImg[x-1][y+1]) { x-=1; y+=1; trace.add(new Point2D(x,y)); } // SW
   else if (binaryImg[x-1][y-1]) { x-=1; y-=1; trace.add(new Point2D(x,y)); } // NW
   else break; // end of the line : space all around us
-
+  
   if (knownThreeway(x,y) || knownFourway(x,y)) break;   // A vertex 
   // we've already found, hence a good place to end the line, as 
   // the optimiser can later mix and match the lines between junctions
@@ -296,9 +304,11 @@ private static boolean isThreeway(int abyte)
 
   return false;
 }
+// ---------------------------------------------------------------
+public boolean isJunction (int x,int y) 
+           { return (knownThreeway(x,y) || knownFourway(x,y)); }
 // --------------------------------------------------------------
-public int getIteration()        {  return pass; }
-
+public int getIteration()  { return pass; }
 
 // Below is temp debug for animation
 // ---------------------------------------------------------------
@@ -311,11 +321,11 @@ try {
 
   FileOutputStream fos=new FileOutputStream(outputfile);
   ImageOutputStream ios=ImageIO.createImageOutputStream(fos); // Creating ios directly gets null!
-  ImageWriteParam jpegParams = writer.getDefaultWriteParam();
+  ImageWriteParam jpegParams=writer.getDefaultWriteParam();
 
-  IIOMetadata data = writer.getDefaultImageMetadata(new ImageTypeSpecifier(image), jpegParams);
-  Element tree = (Element)data.getAsTree("javax_imageio_jpeg_image_1.0");
-  Element jfif = (Element)tree.getElementsByTagName("app0JFIF").item(0);
+  IIOMetadata data=writer.getDefaultImageMetadata(new ImageTypeSpecifier(image),jpegParams);
+  Element tree=(Element)data.getAsTree("javax_imageio_jpeg_image_1.0");
+  Element jfif=(Element)tree.getElementsByTagName("app0JFIF").item(0);
   jfif.setAttribute("Xdensity", Integer.toString(300));
   jfif.setAttribute("Ydensity", Integer.toString(300));
   jfif.setAttribute("resUnits", "1"); // density is dots per inch                 
@@ -323,8 +333,7 @@ try {
 
   writer.setOutput(ios);
 
-  IIOImage iio=new IIOImage(image,null,data);
-  writer.write(data, new IIOImage(image, null, data), jpegParams);
+  writer.write(data,new IIOImage(image,null,data),jpegParams);
   ios.flush();
   ios.close();
 

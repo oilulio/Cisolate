@@ -17,9 +17,7 @@ Copyright (C) 2016  S Combes
 */
 package cisolate;
 
-import java.lang.System;
 import java.util.Random;
-import java.io.*;
 
 public class PathOrder extends Seeker {   
 // A mapping of coordinates to their order in a particular path (n[.])
@@ -49,7 +47,6 @@ public int mapping(int nth) { return n[nth];}
 // ---------------------------------------------------------------------------
 public PathOrder cycle() 
 { // Suggests a mutated form by randomly starting at a new point (still in order)
-double result=0.0;
 
 int start;
 
@@ -67,7 +64,6 @@ public PathOrder mutate() // Suggests a mutated form by swapping a random segmen
 {  // Could pick start or stop randomly - will favour shorter segments
 // or pick start and length for uniform distribution of lengths
 
-double result=0.0;
 int start,stop;
 
 PathOrder candidate=new PathOrder(n.length,true);

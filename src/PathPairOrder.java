@@ -17,10 +17,6 @@ Copyright (C) 2016  S Combes
 */
 package cisolate;
 
-import java.lang.System;
-import java.util.Random;
-import java.io.*;
-
 class PathPairOrder extends PathOrder {   // Travelling salesman path in pairs
 
 // A mapping of coordinates to their order in a particular path (n[.])
@@ -41,7 +37,6 @@ System.arraycopy(p.n,0,n,0,n.length);
 // -------------------------------------------------------------------
 public PathPairOrder cycle() 
 { // Suggests a mutated form by randomly starting at a new point (still in order)
-double result=0.0;
 
 int start;
 
@@ -58,7 +53,6 @@ return candidate;
 public PathPairOrder mutate() 
 {  // Suggests a mutated form by swapping a random segment. 
 
-double result=0.0;
 int start,stop;
 
 PathPairOrder candidate=new PathPairOrder(n.length,true);

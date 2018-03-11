@@ -16,7 +16,6 @@ Copyright (C) 2016  S Combes
 
 */
 package cisolate;
-import java.lang.Math;
 import java.util.Iterator;
 
 class CircularArc implements Iterable<Point2D> {

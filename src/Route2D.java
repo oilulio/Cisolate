@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2016  S Combes
+Copyright (C) 2016-18  S Combes, with thanks to jasoroony for correction.
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -19,13 +19,10 @@ package cisolate;
 
 import java.util.List;
 import java.util.ArrayList;
-import java.awt.image.*; 
 import java.awt.*; 
-import java.util.concurrent.*;
-import java.lang.Thread;
 
 // Despite title, this Class is not generic - it is closely bound to
-// Cisolate, because the 'heat map' input is unlikley to be produced elsewhere.
+// Cisolate, because the 'heat map' input is unlikely to be produced elsewhere.
 // Use caution if re-using 
 
 // Note that Screen Y (and hence internal representation) moves from top down and 
@@ -34,7 +31,6 @@ import java.lang.Thread;
 class Route2D extends Points2D implements Runnable
 {
 // A group of 2D points ordered as a route, i.e. with an explicit transit ordering
-// c.f. Lines2D, where each 
 
 static int [][] lastTouch;
 static double xOrigin;
@@ -50,6 +46,13 @@ static final int FLEXPERCENT=10;
 static final double FLEX=(100.0+FLEXPERCENT)/100.0;
 private volatile boolean stop = false;
 static final String nL = System.getProperty("line.separator");
+static int solved=0;
+static Points2D rawJunctions;
+static Points2D smoothJunctions;
+static {
+  rawJunctions   =new Points2D();
+  smoothJunctions=new Points2D();
+}
 
 public static void initialise(int [][] slastTouch,
           double sxOrigin,double syOrigin,
@@ -70,6 +73,10 @@ private double dlength(int x1,int y1,int x2,int y2)
 { return Math.sqrt((double)((x1-x2)*(x1-x2)+(y1-y2)*(y1-y2))); }
 // ---------------------------------------------------------------
 public void gracefulExit() { stop = true; }
+// ---------------------------------------------------------------
+public static void resetCount() { solved=0; }
+// ---------------------------------------------------------------
+public static int noSolved() { return solved; }
 // ------------------------------------------------------------------
 @Override
 public void run() 
@@ -101,7 +108,6 @@ if (lastTouch==null) {
   System.exit(0);
 }
 cp=new ControlPoints();
-int initcp=cp.getPoints();
 
 // First optimise each arc between a pair of control points individually 
 for (int i=0;i<cp.getArcs();i++) {
@@ -134,6 +140,8 @@ do {
     for (int start=0;start<(cp.getPoints()-group);start++) {
       if (stop) return;
       if (cp.optimiseArc(cp.control.get(start),cp.control.get(start+group))) {
+        if (stop) return;
+
         double previousScore=0.0;
         for (int j=start;j<(start+group);j++) 
           previousScore+=cp.arcScore.get(j);
@@ -148,13 +156,16 @@ do {
     }
   }
 } while (change);
-System.out.print(" ."); // Show progress
+//System.out.print(" +"); // Show progress
+solved++;
 return;
 }
 // ------------------------------------------------------------------
-String smoothGcode(boolean reversed,boolean attached) {
+String smoothGcode(boolean reversed,boolean attached,int millRate,
+     int plungeRate,double millPlunge,double millTransit,boolean backlash,
+     double radius,Skeleton skeleton) {
 // Returns the Gcode for the arc - which may be reversed
-// and/or attched to the last segment - i.e. no transit required
+// and/or attached to the last segment - i.e. no transit required
 // Only to be called after smoothing has completed - currently
 // handled by caller - not especially safe if code is reused.
 
@@ -172,24 +183,36 @@ if (reversed) {
 }
 
 if (!attached) {
-  result.append("G00 Z1.0"+nL);
+  result.append("G00 Z"+millTransit+nL);
   result.append("G00 X"+
-        String.format(fstr,xOrigin+xPerPixel*cp.control.getX(start))+
+        String.format(fstr,  xOrigin+xPerPixel*cp.control.getX(start))+
    " Y"+String.format(fstr,-(yOrigin+yPerPixel*cp.control.getY(start)))+nL);
-  result.append("G01 Z0.0"+nL);
+  result.append("F"+plungeRate+nL);
+  result.append("G01 Z"+millPlunge+nL);
+  result.append("F"+millRate+nL);
 }
 
-for (int i=start;i!=end;i+=inc) {  
+for (int i=start;i!=end;i+=inc) {
+  int xx=cp.control.getX(i);
+  int yy=cp.control.getY(i);
+  
+  if (backlash && skeleton.isJunction(xx,yy) && 
+      !smoothJunctions.contains(xx,yy)) {
+    smoothJunctions.add(new Point2D(xx,yy));
+    result.append(addBacklashTolerance(xx,yy,radius,
+              millRate,plungeRate,millPlunge,millTransit));
+  }
+
   int myArc=i+(reversed?-1:0);
   if (Math.abs(cp.arcRadius.get(myArc))>=MAXRADIUS) {
     result.append("G01 X"+
-         String.format(fstr,xOrigin+xPerPixel*cp.control.getX(i+inc))+
+         String.format(fstr,  xOrigin+xPerPixel*cp.control.getX(i+inc))+
     " Y"+String.format(fstr,-(yOrigin+yPerPixel*cp.control.getY(i+inc)))+nL);
   } else {
-    String hand=(reversed^(cp.arcRadius.get(myArc)>0.0))?"G02 ":"G03 ";
-    result.append(hand+"X"+
-          String.format(fstr,xOrigin+xPerPixel*cp.control.getX(i+inc))+
-     " Y"+String.format(fstr,(-yOrigin+yPerPixel*cp.control.getY(i+inc)))+
+    String hand=((xPerPixel<0)^reversed^(cp.arcRadius.get(myArc)>0.0))?"G03 ":"G02 "; 
+    result.append(hand+"X"+ // Corrected thanks to jasoroony
+          String.format(fstr,  xOrigin+xPerPixel*cp.control.getX(i+inc))+
+     " Y"+String.format(fstr,-(yOrigin+yPerPixel*cp.control.getY(i+inc)))+
      " R"+String.format(fstr,yPerPixel*Math.abs(cp.arcRadius.get(myArc)))+nL);
 // TODO later allow for different x,y scales
   }
@@ -216,9 +239,11 @@ for (int i=0;i!=cp.getArcs();i++) {
 return;
 }
 // ------------------------------------------------------------------
-String rawGcode(boolean reversed,boolean attached) {
+String rawGcode(boolean reversed,boolean attached,int millRate,
+     int plungeRate,double millPlunge,double millTransit,boolean backlash,
+     double radius,Skeleton skeleton) {
 // Returns the Gcode for the arc - which may be reversed
-// and/or attched to the last segment - i.e. no transit required
+// and/or attached to the last segment - i.e. no transit required
 
 StringBuilder result=new StringBuilder("");
 int start,end,inc; 
@@ -234,18 +259,55 @@ if (reversed) {
 }
 
 if (!attached) {
-  result.append("G00 Z1.0"+nL);
+  result.append("G00 Z"+millTransit+nL);
   result.append("G00 X"+
-        String.format(fstr,xOrigin+xPerPixel*getX(start))+
+        String.format(fstr,  xOrigin+xPerPixel*getX(start))+
    " Y"+String.format(fstr,-(yOrigin+yPerPixel*getY(start)))+nL);
-  result.append("G01 Z0.0"+nL);
+  result.append("F"+plungeRate+nL);
+  result.append("G01 Z"+millPlunge+nL);
+  result.append("F"+millRate+nL);
 }
+for (int i=start;i!=end;i+=inc) {
+  int xx=getX(i);
+  int yy=getY(i);
 
-for (int i=start;i!=end;i+=inc) {  
-    result.append("G01 X"+
-         String.format(fstr,xOrigin+xPerPixel*getX(i+inc))+
-    " Y"+String.format(fstr,-(yOrigin+yPerPixel*getY(i+inc)))+nL);
+  if (backlash && skeleton.isJunction(xx,yy) && 
+      !rawJunctions.contains(xx,yy)) {
+    rawJunctions.add(new Point2D(xx,yy));
+    result.append(addBacklashTolerance(xx,yy,radius,
+              millRate,plungeRate,millPlunge,millTransit));
+  }
+  result.append("G01 X"+
+       String.format(fstr,  xOrigin+xPerPixel*getX(i+inc))+
+  " Y"+String.format(fstr,-(yOrigin+yPerPixel*getY(i+inc)))+nL);
 } 
+return new String(result);
+} 
+// ------------------------------------------------------------------
+String addBacklashTolerance(int x,int y,double radius,
+     int millRate,int plungeRate,double millPlunge,double millTransit) {
+// Draws a circle centered at (x,y) to ensure that lines that should meet
+// (either threeway junction or fourway) achieve electrical isolation
+// in cases where machine inaccuracy/backlash means they do not
+// exactly meet.
+
+StringBuilder result=new StringBuilder("");
+
+result.append("G00 Z"+millTransit+nL);
+result.append("G00 X"+
+        String.format(fstr,  xOrigin+xPerPixel*x+radius)+ // radius in mm so no scale
+   " Y"+String.format(fstr,-(yOrigin+yPerPixel*y))+nL);
+result.append("F"+plungeRate+nL);
+result.append("G01 Z"+millPlunge+nL);
+result.append("F"+millRate+nL);
+result.append("G02 I"+String.format(fstr,(-radius))+nL);
+result.append("G00 Z"+millTransit+nL);
+result.append("G00 X"+
+        String.format(fstr,  xOrigin+xPerPixel*x)+
+   " Y"+String.format(fstr,-(yOrigin+yPerPixel*y))+nL);
+result.append("F"+plungeRate+nL);
+result.append("G01 Z"+millPlunge+nL);
+
 return new String(result);
 } 
 // ------------------------------------------------------------------

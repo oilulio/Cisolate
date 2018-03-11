@@ -44,6 +44,17 @@ public int getY(int i)     { return points.get(i).getY(); }
 public Point2D get(int i)  { return points.get(i); }
 public int size()          { return points.size(); }
 
+public boolean contains(Point2D point) {
+  for (Point2D match : this)
+    if (point.equals(match)) return true;
+  return false;
+}
+public boolean contains(int x,int y) {
+  for (Point2D match : this)
+    if (match.equals(x,y)) return true;
+  return false;
+}
+
 @Override
 public double score(Seeker s) 
 {

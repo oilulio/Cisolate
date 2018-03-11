@@ -18,7 +18,6 @@ Copyright (C) 2016  S Combes
 package cisolate;
 
 import java.util.concurrent.*;
-import java.lang.Thread;
 
 public class PcbCellEvolve implements Callable<Boolean> {
 
@@ -114,21 +113,21 @@ for (int y=1;y<(bimg_in[0].length-1);y++) {
   for (int x=min_x;x<max_x;x++) {  
       
     bimg_out[x][y]=false; // May change our mind shortly
-    if (bimg_in[x][y]) { // Only black can be black afterwards
+    if (bimg_in[x][y]) {  // Only black can be black afterwards
       int abyte=(bimg_in[x-1][y-1]?1<<7:0) | (bimg_in[x][y-1]  ?1<<6:0) |
                 (bimg_in[x+1][y-1]?1<<5:0) | (bimg_in[x-1][y]  ?1<<4:0) |
                 (bimg_in[x+1][y]  ?1<<3:0) | (bimg_in[x-1][y+1]?1<<2:0) |
-                (bimg_in[x][y+1]  ?1<<1:0) | (bimg_in[x+1][y+1]?1:0);
+                (bimg_in[x][y+1]  ?1<<1:0) | (bimg_in[x+1][y+1]?1<<0:0);
 
       if ((down)?inPatterns(abyte):inSnrettap(abyte)) {
         change=true;  
       }
-      else  { // Stay black
-        bimg_out[x][y]=true;
-        lasttouch[x][y]=pass; 
-      }
+    else  { // Stay black
+      bimg_out[x][y]=true;
+      lasttouch[x][y]=pass; 
     }
   }
+ }
 }
 return change;
 }

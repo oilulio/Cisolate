@@ -18,7 +18,6 @@ Copyright (C) 2016  S Combes
 package cisolate;
 
 import java.util.Random;
-import java.util.Observable;
 
 public abstract class Optimiser implements Runnable  {
 

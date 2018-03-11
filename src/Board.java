@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2016  S Combes
+Copyright (C) 2016-18  S Combes
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -15,24 +15,20 @@ Copyright (C) 2016  S Combes
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 */
-
 package cisolate;
 
 import org.w3c.dom.*;
 import java.awt.*;
 import javax.swing.*;
+import javax.swing.border.*;
 import java.awt.image.*; 
 import java.awt.event.*; 
 import java.io.*; 
+import java.util.*;
 import javax.imageio.*;
 import javax.imageio.metadata.*;
 import javax.imageio.stream.*;
-import java.util.Date;
-import java.lang.Thread;
 import java.util.concurrent.*;
-import java.util.List;
-import java.util.ArrayList; 
-import java.util.Observable;
 
 class Board extends Observable implements Runnable {
 
@@ -51,28 +47,34 @@ static final String defaultG="G17 G40 G49 G80 G90";
 public BufferedImage  img;    // working, e.g. result of writeBimg
 // **** Always create images in img and copy to final (e.g. drill) when complete
 // so that caller can treat any non-null image as ready, and we only need one Graphics2D context
-public BufferedImage board,cuts,drill,drillPath,heat,junction,millPath,pitch, 
-                     duke,etched; 
+public BufferedImage board,cuts,drill,drillPath,heat,junction,
+          millPath,pitch,duke,etched,gcode; 
 public boolean complete=false;
 public Skeleton skeleton;
- 
+
 private String fname;
 private boolean [][] bimg;
 int xsize,ysize;
 private File mydir;
 private File file;
-boolean verbose,raw,overwrite;
+private JFrame frame;
+boolean verbose,raw,overwrite,doBacklash;
+int flipped=1; // 1=Not; -1=L-R flip.
+// Flipped is  L-R mirror.  All internal calcs done un-flipped,
+// and output images unaffected (but G-code is flipped as this is critcial). 
+// Images shown in GUI do flip.
+
+static final double INCHASMM=25.4;
+double backlashRad;
 int tsd,tsm,copper,maxprocs,etch;
 boolean smoothEtch=false;  
 private double xmmPerPixel;
 private double ymmPerPixel;  
 private double xoffset=0.0;
-private double yoffset=0.0;  // Board coordinates of BL pixel (mm)
-private int forceDPI;
-private int xDPI,yDPI;
-private int resUnits;
-private int Xdensity;
-private int Ydensity;
+private double yoffset=0.0;  // Board coordinates of TL pixel (mm)
+protected int forceDPI;
+private int nativexDPI,nativeyDPI; // As per the image file
+private int xDPI,yDPI;             // Used for our analysis
 private ImageWriter writer;
 private String descriptive;
 public StringBuilder log;
@@ -80,23 +82,39 @@ StringBuffer imgProperties;
 public boolean millCode=true;
 public boolean drillCode=true;
 public int assessedCu=CU_GUESS;
-private volatile boolean stop = false;
-Anneal anneal,annealPair;
-//Progress progress;
+private boolean mixedEdge;
+protected volatile boolean stop=false;
+public Anneal anneal,annealPair;
+private ArrayList<Future<?>> route_done_future;
+double drillPlunge=-1.8; // mm, for G Code
+double drillTransit=1.0; // mm, for G Code
+double millPlunge=-0.3;  // mm, for G Code
+double millTransit=1.0;  // mm, for G Code
+int plungeRate=10; // mm/min
+int millRate=20;   // mm/min
+JProgressBar progressBarDrill,resultBarDrill,progressBarDuke;
+JProgressBar progressBarMill,resultBarMill;
+JTextArea taskOutput;
+JPanel progressPanel;
+public JLabel gen;
+Draggable win;
+protected GCodeInterpreter gci;
 
 final static int CLOSEST=0;
 final static int TENTHINCH=1;
 
 // ---------------------------------------------------------------
-Board(File file) //,Progress progress)
-  { this(file,true,2,2,CU_GUESS,1,true,3,true,0); } //,progress); } // TESTING VALUES
+Board(File file,JFrame frame) 
+  { this(file,true,2,2,CU_GUESS,1,true,3,true,0); this.frame=frame;} 
+  // Call when GUI active.  Values are dummies later overridden by GUI  
 // ---------------------------------------------------------------
 Board(String fname) 
     { this(new File(fname),true,2,2,CU_GUESS,1,true,3,true,0); } // TESTING VALUES
 
 Board(String fname,boolean verbose,int tsd,int tsm,int copper,
     int maxprocs,boolean raw,int etch,boolean overwrite,int forceDPI) {
-  this(new File(fname),verbose,tsd,tsm,copper,maxprocs,raw,etch,overwrite,forceDPI); 
+  this(new File(fname),verbose,tsd,tsm,copper,maxprocs,raw,etch,
+        overwrite,forceDPI); 
 }
 
 Board(File file,boolean verbose,int tsd,int tsm,int copper,
@@ -113,19 +131,18 @@ this.raw=raw;
 this.etch=etch;
 this.overwrite=overwrite;
 this.forceDPI=forceDPI;
-//this.progress=progress;
+complete=false;
 
 log=new StringBuilder();
 imgProperties=new StringBuffer();
 
-String ext = fname.substring(fname.indexOf(".")+1).toLowerCase();  
+String ext = fname.substring(fname.lastIndexOf(".")+1).toLowerCase();  
 
 ImageReader reader=ImageIO.getImageReadersBySuffix(ext).next();
 writer=ImageIO.getImageWritersBySuffix("jpeg").next();
 System.out.println("Reading : "+fname);
 log.append("Based on : "+fname+nL);
 imgProperties.append("File : "+fname+nL);
-
 if (ext.equals("jpg")) {
 
   try {  
@@ -182,8 +199,8 @@ else if (forceDPI == 0) {
 
 if (xmmPerPixel > 0.0001 && ymmPerPixel > 0.0001)
 {
-  xDPI=(int)(0.5+25.4/xmmPerPixel);
-  yDPI=(int)(0.5+25.4/ymmPerPixel);
+  xDPI=nativexDPI=(int)(0.5+INCHASMM/xmmPerPixel);
+  yDPI=nativeyDPI=(int)(0.5+INCHASMM/ymmPerPixel);
   System.out.println(ext.toUpperCase()+" with "+xDPI+" x "+yDPI+" DPI");
   log.append(ext.toUpperCase()+" with "+xDPI+" x "+yDPI+" DPI"+nL);
   imgProperties.append(ext.toUpperCase()+" with "+xDPI+" x "+yDPI+" DPI"+nL);
@@ -194,8 +211,8 @@ else if (forceDPI == 0) {
 } 
 
 if (forceDPI !=0) {
-  xmmPerPixel=25.4/forceDPI;
-  ymmPerPixel=25.4/forceDPI;
+  xmmPerPixel=INCHASMM/forceDPI;
+  ymmPerPixel=INCHASMM/forceDPI;
   xDPI=forceDPI;
   yDPI=forceDPI;
   System.out.println("*********** Forcing DPI to be "+forceDPI);
@@ -217,10 +234,20 @@ for (int i=0;i<img.getWidth();i++)
 double bwratio=(double)black/total;
 assessedCu=(bwratio<0.5)?CU_BLACK:CU_WHITE;  // Less black than white => Black probably Cu
 
+mixedEdge=false;
+boolean edgeCu=isBlack(img.getRGB(0,0));
+for (int i=0;i<img.getWidth();i++) {
+  mixedEdge|=(edgeCu!=isBlack(img.getRGB(i,0)));
+  mixedEdge|=(edgeCu!=isBlack(img.getRGB(i,img.getHeight()-1)));
+}
+for (int j=0;j<img.getHeight();j++) {
+  mixedEdge|=(edgeCu!=isBlack(img.getRGB(0,j)));
+  mixedEdge|=(edgeCu!=isBlack(img.getRGB(img.getWidth()-1,j)));
+}
 if (copper==CU_GUESS) {
   this.copper=assessedCu;  
   System.out.println(nL+"Assessed that the copper is "+((this.copper==CU_BLACK)?"black":"white"));
-  System.out.println("but it is safer if you specify with options -cb or -cw."+nL);
+  //System.out.println("but it is safer if you specify with options -cb or -cw."+nL);
   log.append("Assessed that the copper is "+((this.copper==CU_BLACK)?"black":"white")+nL);
   imgProperties.append("Assessed that the copper is "+((this.copper==CU_BLACK)?"black":"white")+nL);
 }
@@ -250,22 +277,51 @@ xsize=(int)(img.getWidth()/scale);
 ysize=(int)(img.getHeight()/scale);
 
 descriptive=String.format("Board is approximately %.1f x %.1f inches",
+          (double)img.getWidth()/nativexDPI,(double)img.getHeight()/nativeyDPI);
+if (nativexDPI!=xDPI || nativeyDPI!=yDPI) 
+  descriptive+=String.format("Remapped to approximately %.1f x %.1f inches",
           (double)img.getWidth()/xDPI,(double)img.getHeight()/yDPI);
+  
 
 System.out.println(descriptive); // Mostly to trap obvious bloopers
 log.append(descriptive+nL);
 imgProperties.append(descriptive+nL);
 
+if (mixedEdge) {
+  descriptive="***********************************************"+nL+
+  "Board has an outermost pixel surround that is neither "+nL+
+  "wholly copper nor wholly clear.  This is likely to lead to unexpected"+nL+
+  "results."+nL+"***********************************************";
+  log.append(descriptive+nL);
+  imgProperties.append(descriptive+nL);
+}
+
 // mydir = filename pre extension tagged on our path
 String absPath = file.getAbsolutePath();
 
 mydir = new File(absPath.substring(0,absPath.lastIndexOf(File.separator)+1)+
-                 fname.substring(0,fname.indexOf(".")));  
-System.out.println(mydir);
+                 fname.substring(0,fname.lastIndexOf(".")));  
 if (!mydir.exists())
   mydir.mkdir();  
 
 }
+// ---------------------------------------------------------------
+private void updateDrill() {
+if (anneal.running()) {
+  progressBarDrill.setValue((int)(100.0*anneal.getProgress()));
+  resultBarDrill.setValue((int)(100.0-100.0*anneal.getFraction()));
+} 
+}
+// ---------------------------------------------------------------
+private void updateMill() {
+if (annealPair.running()) {
+  progressBarMill.setValue((int)(100.0*annealPair.getProgress()));                  
+  resultBarMill.setValue((int)(100.0-100.0*annealPair.getFraction()));
+}  
+}
+// ---------------------------------------------------------------
+private void updateDuke() 
+    { progressBarDuke.setValue(Route2D.noSolved());}
 // ---------------------------------------------------------------
 public void aChange() 
 { 
@@ -325,27 +381,26 @@ if (!verbose) return;
 // but needed some modding!
 
 String f=mydir+File.separator+name+".jpg";
-
 try {
   File outputfile = new File(f);
   if (!overwrite && outputfile.exists()) overwriteFail(f);  
 
   FileOutputStream fos=new FileOutputStream(f);
   ImageOutputStream ios=ImageIO.createImageOutputStream(fos); // Creating ios directly gets null!
-  ImageWriteParam jpegParams = writer.getDefaultWriteParam();
+  ImageWriteParam jpegParams=writer.getDefaultWriteParam();
 
-  IIOMetadata data = writer.getDefaultImageMetadata(new ImageTypeSpecifier(image), jpegParams);
-  Element tree = (Element)data.getAsTree("javax_imageio_jpeg_image_1.0");
-  Element jfif = (Element)tree.getElementsByTagName("app0JFIF").item(0);
-  jfif.setAttribute("Xdensity", Integer.toString(xDPI));
-  jfif.setAttribute("Ydensity", Integer.toString(yDPI));
+  IIOMetadata mdata=writer.getDefaultImageMetadata(new ImageTypeSpecifier(image),jpegParams);
+  Element tree=(Element)mdata.getAsTree("javax_imageio_jpeg_image_1.0");  
+  Element jfif=(Element)tree.getElementsByTagName("app0JFIF").item(0);
+
+  jfif.setAttribute("Xdensity",Integer.toString(xDPI));
+  jfif.setAttribute("Ydensity",Integer.toString(yDPI));
   jfif.setAttribute("resUnits", "1"); // density is dots per inch                 
-  data.mergeTree("javax_imageio_jpeg_image_1.0",tree);
+  mdata.mergeTree("javax_imageio_jpeg_image_1.0",tree);
 
   writer.setOutput(ios);
 
-  IIOImage iio=new IIOImage(image,null,data);
-  writer.write(data, new IIOImage(image, null, data), jpegParams);
+  writer.write(mdata,new IIOImage(image,null,mdata),jpegParams);
   ios.flush();
   ios.close();
 
@@ -394,16 +449,19 @@ void writeDrillCode(Points2D points,PrintWriter pw,double clear,
 // GCode Y moves from Bottom up - annoying
 
 if (pw==null) return;
- 
+
+if (flipped<0) xoffset=(img.getWidth()*xmmPerPixel);
+else           xoffset=0.0;
+
 pw.println("G00 Z"+String.format("%.3f",clear));
 
 PathOrder po=skeleton.drills.optimum;
 
 for (int i=0;i<points.size();i++) {
   pw.println("G00 X"+String.format("%.3f",
-              xoffset+skeleton.drills.getX(po.mapping(i))*xmmPerPixel)+
+       xoffset+skeleton.drills.getX(po.mapping(i))*xmmPerPixel*flipped)+
              "    Y"+String.format("%.3f",
-              -(yoffset+skeleton.drills.getY(po.mapping(i))*ymmPerPixel)));  
+     -(yoffset+skeleton.drills.getY(po.mapping(i))*ymmPerPixel)));  
   pw.println("G01 Z"+String.format("%.3f",plunge));
   pw.println("G00 Z"+String.format("%.3f",clear));  
 } 
@@ -436,7 +494,7 @@ for (int i=0;i<drill.size();i++) {
     }
   }
 }
-double smallest=Math.pow((double)smallestSq,0.5)*xmmPerPixel/25.4;  // TODO presumes x=y
+double smallest=Math.pow((double)smallestSq,0.5)*xmmPerPixel/INCHASMM;  // TODO presumes x=y
 
 String tmp=String.format("Smallest drill-point separation = %.2f\"",smallest);
 
@@ -480,27 +538,38 @@ log.append(tmp+nL);
 
 tmp="Based on commonest nearest neighbours, estimate of DPI is "+(index*10)+nL;
 if (Math.abs(index*10-xDPI)>1) {
-  tmp+="*** Conflict with expected DPI of "+xDPI+". You may want to re-run with -f"+(index*10)+nL;
+  tmp+="*** Conflict with specified DPI of "+xDPI+". You may want to re-run with DPI as "+(index*10)+nL;
   tmp+="*** Looking at pitches.jpg for more details.  Closest points are amber."+nL;
   tmp+="*** Points whose closest neighbout is at 0.1\" pitch are green."; 
   System.out.println(tmp);
   log.append(tmp+nL); 
 }
-
 return found;
 }
 // ---------------------------------------------------------------
 public void gracefulExit() { 
-  stop = true; 
-  if (skeleton!=null)
-    skeleton.gracefulExit();
-  if (anneal!=null)
-    anneal.gracefulExit(); 
-  if (annealPair!=null)
-    annealPair.gracefulExit(); 
-//  for (int i=0;i<routes.size();i++) // ??? TODO
-  //  routes.get(i).gracefulExit();
+
+// Called from outside.  Stops any currently running jobs, so run() 
+// can just return when it senses stop.  Best to test stop just before
+// starting any new (especially, large) thread.
+
+  //if (skeleton!=null)    skeleton.gracefulExit();  
+  // Because skeleton does most work in constructor, need to use board.stop directly
+  if (win!=null) win.setVisible(false);
+  win=null;
+  if (anneal!=null)      anneal.gracefulExit(); 
+  if (annealPair!=null)  annealPair.gracefulExit(); 
+  stop=true; 
+  if (route_done_future!=null)
+    for (Future<?> f : route_done_future)
+      if (!f.isDone()) f.cancel(true);
+
+  String tmp="*** Processing run cancelled at "+new Date();
+  log.append(nL+tmp+nL);
+  System.out.println(nL+tmp);
 }
+// ------------------------------------------------------------
+public boolean edgeIsMixed() { return mixedEdge; }
 // ------------------------------------------------------------
 private void drawEtch(Graphics2D g2d) {
 
@@ -539,15 +608,126 @@ for (Route2D route : skeleton.routes)
 duke=makeImage(img);
 }
 // ---------------------------------------------------------------
+protected void cleanUp() 
+{
+cuts=null;
+drill=null;
+drillPath=null;
+heat=null;
+junction=null;
+millPath=null;
+pitch=null;
+duke=null;
+etched=null;
+gcode=null;
+}
+// ---------------------------------------------------------------
 public void run()
 {
-
 stop=false;
+cleanUp();
 
-writeFile("board",board);  // Echos startpoint out for the record
+setChanged();       // Time to update GUI
+notifyObservers();
 
+img=makeImage(board);      // Needed after cancel
+writeFile("board",board);  // Echo startpoint out for the record
+
+if (flipped<0) { 
+  log.append("*** G-Code is flipped L-R ***"+nL);
+  imgProperties.append("*** G-Code is flipped L-R *** from "+fname+nL);
+} 
+if (forceDPI !=0) {
+  xmmPerPixel=INCHASMM/forceDPI;
+  ymmPerPixel=INCHASMM/forceDPI;
+  xDPI=forceDPI;
+  yDPI=forceDPI;
+  System.out.println("*********** Forcing DPI to be "+forceDPI);
+  log.append("DPI was forced to be "+forceDPI+nL);
+  descriptive=String.format("Board is therefore approximately %.1f x %.1f inches",
+          (double)img.getWidth()/xDPI,(double)img.getHeight()/yDPI);
+
+  System.out.println(descriptive); // Mostly to trap obvious bloopers
+  log.append(descriptive+nL);
+  imgProperties.append("Forced DPI to "+forceDPI+nL+descriptive+nL);
+}
 if (!millCode)  tsm=0;  // Zero optimisations if we're not doing the code
 if (!drillCode) tsd=0; 
+
+progressBarDrill=new JProgressBar(0,100);
+progressBarDrill.setValue(0);
+progressBarDrill.setStringPainted(true);
+
+resultBarDrill=new JProgressBar(0,100);
+resultBarDrill.setValue(0);
+resultBarDrill.setStringPainted(true);
+
+progressBarMill=new JProgressBar(0,100);
+progressBarMill.setValue(0);
+progressBarMill.setStringPainted(true);
+
+resultBarMill=new JProgressBar(0,100);
+resultBarMill.setValue(0);
+resultBarMill.setStringPainted(true);
+
+progressBarDuke=new JProgressBar(0,100);
+progressBarDuke.setValue(0);
+progressBarDuke.setStringPainted(true);
+
+JPanel drillPanel=new JPanel();
+drillPanel.setBorder(new LineBorder(Color.gray,2,false));
+
+drillPanel.setLayout(new GridLayout(2,2,7,2));
+drillPanel.add(new JLabel("<html>Drill optimsation progress</html>",
+                  SwingConstants.RIGHT)); // html allows wrap
+drillPanel.add(progressBarDrill);
+drillPanel.add(new JLabel("<html>Reduction achieved</html>",
+                  SwingConstants.RIGHT));
+drillPanel.add(resultBarDrill);
+
+JPanel millPanel=new JPanel();
+millPanel.setBorder(new LineBorder(Color.gray,2,false));
+
+millPanel.setLayout(new GridLayout(2,2,7,2));
+millPanel.add(new JLabel("<html>Mill optimsation progress</html>",
+                  SwingConstants.RIGHT));
+millPanel.add(progressBarMill);
+millPanel.add(new JLabel("<html>Reduction achieved</html>",
+                  SwingConstants.RIGHT));
+millPanel.add(resultBarMill);
+
+JPanel dukePanel=new JPanel();
+dukePanel.setBorder(new LineBorder(Color.gray,2,false));
+
+dukePanel.setLayout(new GridLayout(1,2,7,2));
+dukePanel.add(new JLabel("<html>Curve smoothing progress</html>",
+                  SwingConstants.RIGHT)); 
+dukePanel.add(progressBarDuke);
+
+progressPanel=new JPanel();
+progressPanel.setBorder(new LineBorder(Color.gray,5,false));
+    
+progressPanel.setLayout(new GridLayout(6,1,7,2)); 
+
+JLabel label=new JLabel("Cisolate Progress Dashboard",
+                    SwingConstants.CENTER);
+label.setFont(label.getFont().deriveFont(label.getFont().getStyle()|Font.BOLD));  
+progressPanel.add(label);
+                
+progressPanel.add(new JLabel(""));
+gen=new JLabel("Automata generation 1",SwingConstants.CENTER);
+progressPanel.add(gen);
+progressPanel.add(drillPanel);
+progressPanel.add(millPanel);
+progressPanel.add(dukePanel);
+
+win=new Draggable(frame);
+        
+win.setSize(300,380);
+win.setLocation(100,50);
+win.getContentPane().add(progressPanel,"Center");
+ 
+win.setVisible(true);
 
 bimg=new boolean[img.getWidth()][img.getHeight()];
 Graphics2D g2d = img.createGraphics();
@@ -562,8 +742,12 @@ ExecutorService pool=
        Executors.newFixedThreadPool(maxprocs);
 
 if (stop) return;
-skeleton=new Skeleton(bimg,pool);
-Route2D.initialise(skeleton.lasttouch,xoffset,yoffset,xmmPerPixel,ymmPerPixel);
+skeleton=new Skeleton(bimg,pool,this);
+if (stop) return;
+if (flipped<0) xoffset=(img.getWidth()*xmmPerPixel);
+else           xoffset=0.0;
+Route2D.initialise(skeleton.lasttouch,xoffset,yoffset,
+                   xmmPerPixel*flipped,ymmPerPixel);
 
 writeTouch("heat");
 heat=makeImage(img);
@@ -592,6 +776,7 @@ if (!smoothEtch && etch>0) drawEtch(g2d); // Can have it now if not smoothed
 setChanged();       // Time to update GUI
 notifyObservers();
 
+if (stop) return;
 System.out.println("\n\n"+skeleton.drills.size()+" drill points found");
 log.append(skeleton.drills.size()+" drill points found"+nL);
 System.out.println(skeleton.threeWays.size()+" three-way intersections found");
@@ -602,12 +787,15 @@ System.out.println(skeleton.fourWays.size()+" four-way intersections found\n");
 
 anneal=new Anneal(skeleton.drills, // last two params are tuneable
               new PathOrder(skeleton.drills.size()),tsd,0.002,0.9);
+log.append("Drilling optimisation replications="+tsd+nL);
 
 Future< ? > tsDoneFuture;
 tsDoneFuture=pool.submit(anneal);
-if (stop) anneal.gracefulExit(); 
 
-boolean drillPathDone=false;
+if (tsd==0)
+  System.out.println("No drill order optimisation requested");
+else 
+  System.out.println("Drill order optimisation starting "+new Date());
 // ------------------------------------------------------------
 // Kick off the milling paths optimisation thread
 
@@ -619,11 +807,13 @@ if (tsm==0)
   System.out.println("No mill order optimisation requested");
 else
   System.out.println("Mill order optimisation starting "+new Date());
+
+log.append("Milling optimisation replications="+tsm+nL);
+
 tspDoneFuture=pool.submit(annealPair);
 
-if (stop) annealPair.gracefulExit();
-
 System.out.println("\nFound "+skeleton.routes.size()+" routes to optimise");
+progressBarDuke.setMaximum(skeleton.routes.size());
 
 if ((skeleton.drills.size()/(skeleton.routes0w+1)) < 20.0) { 
 // ratio of drill points to circuits (+1 to avoid div by zero)
@@ -632,12 +822,12 @@ if ((skeleton.drills.size()/(skeleton.routes0w+1)) < 20.0) {
   log.append("*** The ratio between drill points and circuits suggests "+
           "the copper colour may be wrongly assigned ***"+nL);
 }
-
+if (stop) return; 
 // ------------------------------------------------------------
 // Put the jobs for route smoothing into the pool
-ArrayList<Future<?>> route_done_future = new ArrayList<Future<?>>();  
+Route2D.resetCount();
+route_done_future=new ArrayList<Future<?>>();  
 int bigIndex=0;
-double taskSize=0.0; // used for % complete
 int [] submitOrder=new int[skeleton.routes.size()];
 boolean [] done=new boolean[skeleton.routes.size()];
 
@@ -653,7 +843,6 @@ if (!raw && millCode) {
       maxLen=skeleton.routes.get(i).size(); 
       bigIndex=i; 
     } 
-    taskSize+=(Math.pow(skeleton.routes.get(i).size(),2));
   }
   if (stop) return;
   route_done_future.add(pool.submit(skeleton.routes.get(bigIndex))); // Biggest one
@@ -663,7 +852,6 @@ if (!raw && millCode) {
   // While optimisations are still running, we will have maxprocs+2
   // threads going
 
-  double complete=0.0;
   try {
     for (int i=0;i<skeleton.routes.size();i++) {
       if (i!=bigIndex) {
@@ -672,22 +860,21 @@ if (!raw && millCode) {
           for (int j=0;j<index;j++) {
             if (done[j]) continue;
 
-/*            if (!drillPathDone) {
-
-              if (tsDoneFuture.isDone()) {
-                drillPathDone=true;
-                setChanged();       // Time to update GUI
-                notifyObservers();
-              }
-            }*/
-
-            try { route_done_future.get(j).get(10, TimeUnit.MILLISECONDS); 
-                  complete+=(Math.pow(skeleton.routes.get(j).size(),2)); 
+            try { route_done_future.get(j).get(50, TimeUnit.MILLISECONDS); 
                   done[j]=true;
-            } catch (TimeoutException e) { active++; }  
+            } catch (TimeoutException e) { 
+              active++; 
+
+              updateDrill();
+              updateMill();       
+              updateDuke();
+              
+              if (stop) skeleton.routes.get(j).gracefulExit();             
+              if (stop) skeleton.routes.get(bigIndex).gracefulExit();             
+            } catch (CancellationException e) { /* Just asynchronous */ }
           }
           if (active < maxprocs) break;
-          Thread.sleep(1000);  // Don't test again too soon
+          Thread.sleep(150);  // Don't test again too soon
         } while (true);
 
         if (stop) return;
@@ -697,9 +884,8 @@ if (!raw && millCode) {
       }
     }
   }
-  catch (InterruptedException e) { System.out.println("A Int ERROR **** "+e);e.printStackTrace(); }
+  catch (InterruptedException e) { System.out.println("A Interruption **** "+e); }
   catch (ExecutionException e)   { System.out.println("A Exec ERROR **** "+e);e.printStackTrace(); }
- 
 }
 pool.shutdown(); // No more submissions
 
@@ -707,9 +893,20 @@ pool.shutdown(); // No more submissions
 // Display the drill travelling salesman result
 
 // Wait for the drill travelling salesman result
-try {  do {} while (tsDoneFuture.get()!=null); }
-catch (InterruptedException e) { System.out.println("TS Int ERROR ****"); }
-catch (ExecutionException e)   { System.out.println("TS Exec ERROR ****"); }
+boolean finished=false;
+
+do {
+  if (stop) return;
+
+  updateDrill();
+  updateMill();       
+  updateDuke();
+  try { finished|=(tsDoneFuture.get(100,TimeUnit.MILLISECONDS)==null); }
+  catch (TimeoutException e) { /* Again, then */ }
+  catch (CancellationException e) { /* Just asynchronous */ }
+  catch (InterruptedException e) { System.out.println("TS Int ERROR ****");  }
+  catch (ExecutionException e)   { System.out.println("TS Exec ERROR ****"); }  
+} while(!finished);
 
 if (tsd!=0) {
   System.out.println(nL+"Drill order optimisation complete "+new Date());
@@ -717,7 +914,7 @@ if (tsd!=0) {
   log.append("G code drilling transits have been reduced to "+
      String.format("%.1f",anneal.getFraction()*100.0)+"% of original"+nL);
 } 
-if (drillCode) {
+if (!stop && drillCode) {
   try {
     String fd=mydir+"/drill.tap";
     File fid=new File(fd);
@@ -729,9 +926,9 @@ if (drillCode) {
     pwd.println("(Created "+new Date()+")");
     pwd.println(defaultG);
     pwd.println("G21");  // Metric.  
-    pwd.println("F10");  // TODO, make variable
-    pwd.println("M30");  
-    writeDrillCode(skeleton.drills,pwd,1.0,-1.0); // TODO make variable
+    pwd.println("F"+Integer.toString(plungeRate));  
+    //pwd.println("M30");  
+    writeDrillCode(skeleton.drills,pwd,drillTransit,drillPlunge); 
     pwd.close();
   } catch (IOException e) { e.printStackTrace(); System.exit(0); }
 
@@ -753,9 +950,17 @@ notifyObservers();
 
 // ------------------------------------------------------------
 // Wait for the milling optimisation to finish - we're stuck without it
-try { {}  while (tspDoneFuture.get()!=null); }
-catch (InterruptedException e) { System.out.println("TSP Int ERROR ****");  e.printStackTrace(); }
-catch (ExecutionException e)   { System.out.println("TSP Exec ERROR ****"); e.printStackTrace(); }
+finished=false;
+
+do {
+  if (stop) return;
+  updateMill();       
+  updateDuke();
+  try { finished|=(tspDoneFuture.get(100,TimeUnit.MILLISECONDS)==null); }
+  catch (TimeoutException e) { }
+  catch (InterruptedException e) { System.out.println("TS Int ERROR ****");  }
+  catch (ExecutionException e)   { System.out.println("TS Exec ERROR ****"); }  
+} while(!finished);
 
 if (tsm!=0) { // Only say it's done if we did something
   System.out.println("Mill order optimisation complete "+new Date());
@@ -766,11 +971,10 @@ copyImage(board,img);
 
 int cnc_x=0; // Initially
 int cnc_y=0;
-int cnc_z=0;
 
-if (millCode) {
+if (!stop && millCode) {
   try {
-    String f=mydir+"/smoothIsolation.tap";
+    String f=mydir+"/smoothIsolation.tap"; 
     File fi=new File(f);
     PrintWriter pw=new PrintWriter(fi); // But won't use if raw
 
@@ -781,7 +985,6 @@ if (millCode) {
       pw.println("(Created "+new Date()+")");
       pw.println(defaultG);
       pw.println("G21");   // Metric.  
-      pw.println("F100");  // TODO, make variable
     }
 
     String fr=mydir+"/rawIsolation.tap";
@@ -795,7 +998,6 @@ if (millCode) {
 
     pwr.println(defaultG);
     pwr.println("G21");   // Metric.  
-    pwr.println("F100");  // TODO, make variable
 
 // Optimiser can choose to cut some traces in the 'reverse' direction to
 // the way we found them.  j>k is the clue.  Note, j=k+1 or k=j+1. Hence j!=k. 
@@ -810,11 +1012,14 @@ if (millCode) {
       int startIndex=0; // Always 0, but now has a name
       int endIndex=skeleton.routes.get(baseRoute).size()-1;
 
-      // Need to see if that specific route has been smoothed yet
-      if (!raw) {
+      // Need to see if that specific route has been smoothed yet ...
+      if (!raw) { // ... but it won't have been smoothed if we don't want smoothing
+      
         try { do {} while (route_done_future.get(submitOrder[baseRoute]).get()!=null); }
         catch (InterruptedException e) { System.out.println("Int ERROR **** "+e); }
         catch (ExecutionException e)   { System.out.println("Exec ERROR **** "+e); }
+        catch (CancellationException e) { /* Just asynchronous */ }
+        updateDuke();
       }
       boolean attached= // Does it follow on from the last one?
        (skeleton.routes.get(baseRoute).getX(reversed?endIndex:startIndex)==cnc_x &&
@@ -824,8 +1029,10 @@ if (millCode) {
       cnc_x=skeleton.routes.get(baseRoute).getX(reversed?startIndex:endIndex); 
       cnc_y=skeleton.routes.get(baseRoute).getY(reversed?startIndex:endIndex); 
       if (!raw)
-        pw.print(skeleton.routes.get(baseRoute).smoothGcode(reversed,attached));
-      pwr.print(skeleton.routes.get(baseRoute).rawGcode(reversed,attached));
+        pw.print(skeleton.routes.get(baseRoute).smoothGcode(reversed,attached,millRate,
+           plungeRate,millPlunge,millTransit,doBacklash,backlashRad,skeleton));
+        pwr.print(skeleton.routes.get(baseRoute).rawGcode(reversed,attached,millRate,
+           plungeRate,millPlunge,millTransit,doBacklash,backlashRad,skeleton));
 
       // Draw cutting routes in green
       for (int m=0;m<skeleton.routes.get(baseRoute).size();m++) {
@@ -879,12 +1086,27 @@ if (millCode) {
 
   millPath=makeImage(img);
   writeFile("milling",millPath);
+  
+  // G code generation is very fast, no need to parallelise
+  System.out.println(nL+"Start G-code image generation "+new Date());
+  if (raw) {
+    gci=new GCodeInterpreter(mydir+"/rawIsolation.tap",
+         img.getWidth()*xmmPerPixel,img.getHeight()*ymmPerPixel);
+  } else { // Use smoothed version if possible
+    gci=new GCodeInterpreter(mydir+"/smoothIsolation.tap",
+         img.getWidth()*xmmPerPixel,img.getHeight()*ymmPerPixel);
+  }
+  System.out.println("End G-code image generation "+new Date()+nL);
+  gcode=makeImage(gci.bi); 
 }
 
 // ------------------------------------------------------------
+if (stop) return;
 if (smoothEtch && etch>0) drawEtch(g2d);
 if (!raw && millCode) drawDuke(g2d);
 // ------------------------------------------------------------
+if (win!=null) win.setVisible(false);
+win=null;
 setChanged();       // Time to update GUI
 notifyObservers();
 
@@ -920,6 +1142,457 @@ try {
 
   pwl.close();
 } catch (IOException e) { e.printStackTrace(); System.exit(0); }
+
+}
+// ---------------------------------------------------------------
+public class Draggable extends JWindow {
+ 
+int X;
+int Y;
+ 
+Draggable(JFrame f) {
+ 
+super(f);
+setBounds(50,50,100,100);
+ 
+addMouseListener(new MouseAdapter() {
+  public void mousePressed(MouseEvent me) { X=me.getX();Y=me.getY(); }
+});
+addMouseMotionListener(new MouseMotionAdapter() {
+  public void mouseDragged(MouseEvent me) {
+    Point p = getLocation();
+    setLocation(p.x+(me.getX()-X),p.y+(me.getY()-Y));
+}
+});
+ 
+this.setVisible(true);
+}
+}
+// ---------------------------------------------------------------
+double gcodeToImageRatio(int forceDPI) 
+{ // TODO allow different x,y DPI
+if (forceDPI==0) return 0.5*GCodeInterpreter.dpmm/(nativexDPI/INCHASMM);  
+else             return 0.5*GCodeInterpreter.dpmm/(forceDPI/INCHASMM);  
+}
+// ---------------------------------------------------------------
+class GCodeInterpreter
+{
+// This class is a MINIMAL G Code interpreter.  It can only process
+// Vertical movements with no concurrent x,y change OR
+// Horizontal movements with no concurrent z change.
+
+// It also uses an inflexible syntax, only allowing the formats
+// that Cisolate produces.  e.g. "G00 X12.0" will move to X=12.0
+// whereas "X12.0" after a G00 on a previous line will not,
+// nor will "G0 X12.0" nor "G00 X 12.0"  TODO : improve this.
+
+// However this set of movements are sufficient for PCB milling and
+// drilling operations as generated by Cisolate.
+// Movements are assumed to be ABSOLUTE
+
+// G00, G01, G02, G03 are supported.
+
+// For these reasons this is currently an inner class of Board, as
+// it is currently too bespoke to be a generic class.
+
+// Code is intended to determine the correct order in which to visit 
+// pixels on a raster (i.e. appropriate to drive stepper motors)
+// always moving in a rookwise (rather than kingwise) motion.
+// But some elements (notably final alignment at end of curve/line)
+// do currently utilise kingwise.
+
+// Code was originally C and is intended to be used as C again, hence
+// is not overly converted to an OO paradigm.
+
+static final int NE=(0);
+static final int SE=(1);
+static final int SW=(2);
+static final int NW=(4);
+static final int NO_MOVE=(0);
+static final int PLUS_X =(1);
+static final int PLUS_Y =(2);
+static final int MINUS_X=(3);
+static final int MINUS_Y=(4);
+static final int PLUS_Z =(5);
+static final int MINUS_Z=(6);
+static final int LINE_EV  =0;
+static final int CIRCLE_EV=1;
+
+static protected final int dpmm=25;  //  dots per mm (25 ~=600 dpi)  Probably needs to be at least 5
+double scale=1.0/dpmm;
+int direction;
+int move=NO_MOVE;
+int x=0; // Coordinates +ve to right (East)
+int y=0; // +ve up (North)
+int z=0; // +ve up (Z)
+int x0,y0;
+int ii,jj;
+int finalx,finaly; // End of line
+int event=LINE_EV;
+int dividing;
+boolean cw;  // Clockwise.  Must enforce CW =0 or 1
+boolean vertical;
+boolean clear;
+boolean fail;
+long rsq,rsq2;
+double dp,dq;
+protected BufferedImage bi;
+private ImageWriter writer;
+
+private volatile boolean stop=false;
+
+GCodeInterpreter(String filename,double xsize,double ysize) {
+
+int wi=(int)(xsize*dpmm/2);
+int hi=(int)(ysize*dpmm/2);
+bi=new BufferedImage(wi,hi,BufferedImage.TYPE_3BYTE_BGR);
+dividing=(int)(0.5+dpmm*(millPlunge+millTransit)/2.0);
+Gfile gf=new Gfile(filename);
+x=y=z=0;
+double xis=0.0;
+double yis=0.0;
+double zis=0.0;
+double ris=0.0;
+double iis=0.0;
+double jis=0.0;
+
+while (gf.hasNext()) {
+  String line=gf.next();
+  // Remove comments
+  StringBuilder sb=new StringBuilder(line.length());
+  int brack=0;
+  for (int i=0;i<line.length();i++) {
+    if (brack==0 && line.charAt(i)!='(') sb.append(line.charAt(i));
+    if (line.charAt(i)=='(') brack++;
+    if (line.charAt(i)==')') brack--;
+    if (brack<0) brack=0;
+  }
+  line=sb.toString().toUpperCase();  // Case insensitive for rest
+  // System.out.println(">>>> "+line);
+  int xat=line.indexOf("X");
+  int yat=line.indexOf("Y");
+  int zat=line.indexOf("Z");
+  int gat=line.indexOf("G");
+  int rat=line.indexOf("R");
+  int iat=line.indexOf("I");
+
+  boolean containsX=(xat>=0);
+  boolean containsY=(yat>=0);
+  boolean containsZ=(zat>=0);
+  boolean containsG=(gat>=0);
+  boolean containsR=(rat>=0);
+  boolean containsI=(iat>=0);
+  if (containsG) {
+    if (containsZ && (containsX || containsY)) {
+      System.out.println("G code mixes horizontal and vertical moves");
+      System.exit(0);
+    }
+    if (containsX) xis=getNo(line.substring(xat+1));
+    if (containsY) yis=getNo(line.substring(yat+1));
+    if (containsZ) zis=getNo(line.substring(zat+1));
+    if (containsR) ris=getNo(line.substring(rat+1));
+    if (containsI) iis=getNo(line.substring(iat+1));
+    jis=yis; // We know we don't use J in the file, so J must equal Y
+
+    try {
+      if (z<dividing) bi.setRGB(x/2,-y/2,0xFF<<8);
+      else            bi.setRGB(x/2,-y/2,0xFF<<16);
+    } catch (ArrayIndexOutOfBoundsException e) {}
+
+    
+    if (line.indexOf("G00")>=0 || line.indexOf("G01")>=0) { // A line
+      if (containsX || containsY) {
+        setupLine(scaled(xis),scaled(yis));
+        while (nextEvent()) { /* Dummy */ }
+      }
+      else if (containsZ) {
+        z=(int)(0.5+zis*dpmm);
+      }
+    }
+    else if (line.indexOf("G02")>=0) { // A cw circle
+      if (containsI) {
+        setupCircle(true,true,scaled(xis+iis),scaled(jis),
+            scaled(xis),scaled(yis));
+      } else {
+        setCentre(scaled(xis),scaled(yis),ris*dpmm,true);
+        setupCircle(true,false,ii,jj,scaled(xis),scaled(yis));
+      }
+      while (nextEvent()) { /* Dummy */ }
+    }
+    else if (line.indexOf("G03")>=0) { // A ccw circle
+      if (containsI) {
+        setupCircle(false,true,scaled(xis+iis),scaled(jis),
+            scaled(xis),scaled(yis));
+      } else {
+        setCentre(scaled(xis),scaled(yis),ris*dpmm,false);
+        setupCircle(false,false,ii,jj,scaled(xis),scaled(yis));
+      }
+      while (nextEvent()) { /* Dummy */ }
+    }
+  }
+}
+writeFile("gcodePaths",bi);
+}
+// ---------------------------------------------------------------
+private int scaled(double q) { return 2*(int)(0.5+q*dpmm/2.0); } 
+// Enforce evenness and scale
+// ---------------------------------------------------------------
+private final boolean nextEvent() {
+  if      (event==CIRCLE_EV) return nextCircle();
+  else if (event==LINE_EV)   return nextLine();
+  else System.out.println("Selection Error"); // Should not get here
+  if (true) System.exit(0);                   // Should not get here
+  return false;                               // Should not get here
+}
+// ---------------------------------------------------------------
+private long distancesq(int deltax, int deltay) {
+    return ((long)deltax*(long)deltax+(long)deltay*(long)deltay);}
+// ---------------------------------------------------------------
+private void setCentre(int fx,int fy,double radius,boolean cw) {
+// Sets centre (I,J) of G02/G03 curve given x,y and finalx,
+// finaly and radius.
+
+double hyp=Math.hypot(fy-y,fx-x);
+
+double fromChord=Math.sqrt(radius*radius-hyp*hyp/4.0);
+
+double intermedX=(fx+x)/2.0;
+double intermedY=(fy+y)/2.0;
+
+int centreX=(int)(0.5+intermedX+(cw?1:-1)*fromChord*(fy-y)/hyp);
+int centreY=(int)(0.5+intermedY+(cw?1:-1)*fromChord*(x-fx)/hyp);
+
+ii=centreX;
+jj=centreY;
+}
+// ---------------------------------------------------------------
+private double getNo(String sub)
+{
+int end=sub.indexOf(" ");
+if (end<0) end=sub.length();
+return Double.parseDouble(sub.substring(0,end));
+}
+// ---------------------------------------------------------------
+private int getInt(String sub)
+{
+int end=sub.indexOf(" ");
+if (end<0) end=sub.length();
+return Integer.parseInt(sub.substring(0,end));
+}
+// ------------------------------------------------------------------------------------
+private void setupLine(int fx,int fy) {
+// Sets up parameters for a line from the current x,y to a future fx,fy
+// Parameters are vertical,direction,x0,y0,finalx,finaly,dp,dq
+int deltax,deltay;
+
+event=LINE_EV;
+x0=x;
+y0=y;
+finalx=fx;
+finaly=fy;
+deltax=(fx-x);
+deltay=(fy-y);
+dp=(double)deltax;
+dq=(double)deltay;
+
+vertical=(deltax==0);  // Useful flag to avoid later division by zero
+if (deltax>0)  direction=(deltay>0)?NE:SE; // Pick quadrant.  Needs no special case
+else           direction=(deltay>0)?NW:SW; // for horizontal or vertical
+}
+// ------------------------------------------------------------------------------------
+private final boolean nextLine() {
+// Finds the next move for a line whose parameters are already set up
+// returning False indicates no further move
+int y1;
+
+if (x==finalx && y==finaly) return false;
+if (Math.abs(x-finalx)<3 && Math.abs(y-finaly)<3 ) {
+  x=finalx; // TODO : Ensure rookwise
+  y=finaly;
+  return true;
+}
+
+if (vertical) { // Avoid division by zero - simple.  Go up or down based on N or S
+  switch (direction) {
+    case (NE): // Fall-though
+    case (NW): move=PLUS_Y;  break;
+    case (SE): // Fall-though
+    case (SW): move=MINUS_Y; break;
+  }
+}
+else {
+  y1=(int)(y0+((x+1-x0)/dp)*dq);
+
+  switch (direction) {
+    case (NE): move=(y1<(y+1))? PLUS_X :PLUS_Y;  break;
+    case (SE): move=(y1<(y-1))? MINUS_Y:PLUS_X;  break;
+    case (SW): move=(y1<(y-1))? MINUS_Y:MINUS_X; break;
+    case (NW): move=(y1<(y+1))? MINUS_X:PLUS_Y;  break;
+  }
+}
+try {
+  if (z<dividing)  bi.setRGB(x/2,-y/2,0xFF<<8);
+  else             bi.setRGB(x/2,-y/2,0xFF<<16);
+} catch (ArrayIndexOutOfBoundsException e) {}
+
+switch (move) {
+  case (PLUS_X):  x+=2; break;
+  case (PLUS_Y):  y+=2; break;
+  case (MINUS_X): x-=2; break;
+  case (MINUS_Y): y-=2; break;
+}
+move=NO_MOVE;
+
+return true;
+}
+// ------------------------------------------------------------------------------------
+void setupCircle(boolean clock,boolean full,int i,int j,int fx,int fy) {
+// Sets up a circle from our current (x,y) with centre (i,j)
+// to an endpoint (fx,fy) - which can be x,y
+cw=clock;
+clear=false; // Are we clear of startpoint yet?
+
+event=CIRCLE_EV;  // May get overridden later
+x0=i;
+y0=j;
+finalx=fx;
+finaly=fy;
+int deltax=(x-i);
+int deltay=(y-j);
+
+if (!full && (Math.abs(fx-x)+Math.abs(fy-y))<6) {
+  setupLine(fx,fy);  // Such a short arc is a line, and treated as a circle
+  return;            // they have a nasty tendency to go the wrong direction
+} 
+
+if (cw) { if (deltax>0) direction=(deltay>0)?SE:SW;
+          else          direction=(deltay>0)?NE:NW;
+} else  {
+          if (deltax>0) direction=(deltay>0)?NW:NE;
+          else          direction=(deltay>0)?SW:SE;
+}
+
+rsq =distancesq(x-x0,y-y0);  // The circle radius squared
+rsq2=distancesq(fx-x0,fy-y0); 
+}
+// ---------------------------------------------------------------
+private final boolean nextCircle()
+{ // Finds the next move for a circle whose parameters have 
+  // previously been set up
+long r2sq;
+
+r2sq=0;
+
+int deltax=(x-x0);
+int deltay=(y-y0);
+
+if (cw) { if (deltax>0) direction=(deltay>0)?SE:SW;
+          else          direction=(deltay>0)?NE:NW;
+} else {
+          if (deltax>0) direction=(deltay>0)?NW:NE;
+          else          direction=(deltay>0)?SW:SE;
+}
+
+switch (direction) {
+  case (NE):
+    r2sq=distancesq(x-x0+1,y-y0+1);
+	  move=(cw ^ (r2sq > rsq))?PLUS_Y:PLUS_X;
+ /*     if (cw  && x/2==x0/2) direction=SE;
+      if (!cw && y/2==y0/2) direction=NW;*/
+	  break;
+
+  case (SE):
+    r2sq=distancesq(x-x0+1,y-y0-1);
+	  move=(cw ^ (r2sq > rsq))?PLUS_X:MINUS_Y;
+/*      if (cw  && y/2==y0/2) direction=SW;
+      if (!cw && x/2==x0/2) direction=NE;*/
+	  break;
+
+  case (SW):
+    r2sq=distancesq(x-x0-1,y-y0-1);
+	  move=(cw ^ (r2sq > rsq))?MINUS_Y:MINUS_X;
+   /*   if (cw  && x/2==x0/2) direction=NW;
+      if (!cw && y/2==y0/2) direction=SE;*/
+	  break;
+
+  case (NW):
+    r2sq=distancesq(x-x0-1,y-y0+1);
+	  move=(cw ^ (r2sq > rsq))?MINUS_X:PLUS_Y;
+ /*     if (cw  && y/2==y0/2) direction=NE;
+      if (!cw && x/2==x0/2) direction=SW;*/
+	  break;
+  }
+
+  if (clear && (x==finalx) && (y==finaly)) return false;
+
+  // Special case to make sure we hit it.
+  if (Math.abs(x-finalx)<3 && Math.abs(y-finaly)<3) {
+    if (clear) {
+      x+=(2*Integer.signum(finalx-x)); // TODO Enforce rookwise
+      y+=(2*Integer.signum(finaly-y));
+      return true;
+    }
+  } else { clear=true; } // we have left the startpoint
+
+  
+switch (move) {
+  case (PLUS_X):  x+=2; break;
+  case (PLUS_Y):  y+=2; break;
+  case (MINUS_X): x-=2; break;
+  case (MINUS_Y): y-=2; break;
+}
+move=NO_MOVE;
+
+try {
+  if (z<dividing) bi.setRGB(x/2,-y/2,0xFF<<8);
+  else            bi.setRGB(x/2,-y/2,0xFF<<16);
+} catch (ArrayIndexOutOfBoundsException e) {}
+
+return true;
+}
+// ---------------------------------------------------------------
+public void gracefulExit() { stop = true; }
+// ---------------------------------------------------------------
+class Gfile implements Iterator {
+
+BufferedReader in;
+String line;
+boolean more;
+
+// --------------------------------------------------------------------------------------
+Gfile(String filename)
+{
+try {  in = new BufferedReader(new FileReader(filename)); }
+catch (IOException e) { System.out.println("G Code File not found"); }
+more=true;
+getLine();
+}
+// --------------------------------------------------------------------------------------
+private void getLine()
+{
+try { line = in.readLine(); }
+catch (IOException e) { more=false; }
+if (line==null) more=false;
+if (!more) {
+  try {  in.close(); }
+  catch (IOException e) { }
+}
+}
+// --------------------------------------------------------------------------------------
+public boolean hasNext() { return more; }
+// --------------------------------------------------------------------------------------
+public String next()
+{
+if (line==null) throw new NoSuchElementException();
+
+String prev=new String(line);
+getLine();
+return prev;
+}
+// --------------------------------------------------------------------------------------
+public void remove() { getLine(); }
+}
+// --------------------------------------------------------------------------------------
 
 }
 }

@@ -54,6 +54,8 @@ if (coolRate > 1.0 || coolRate <= 0.0)
   throw new IllegalArgumentException("Cooling rate out of range");
 if (temperature <= 0.0)
   throw new IllegalArgumentException("Temperature out of range");
+
+rep=0; // Not running
 }
 // ------------------------------------------------------------------------
 public int completedBy() { return lastChange; } // Only valid once done
@@ -67,9 +69,8 @@ bestScore=optimee.score(best);
 double lastScore=optimee.score(start);
 startScore=lastScore;
 
-for (rep=0;rep<reps;rep++) {
+for (rep=1;rep<=reps;rep++) {
   if (stop) return; // Note we are running in parallel - stop can be set outside.
-
   for (int subrep=0;subrep<30000;subrep++) {
 
     Seeker candidate=last.neighbour();
@@ -101,12 +102,15 @@ for (rep=0;rep<reps;rep++) {
   }
   temperature*=coolRate;
 }
+rep=0;  // Done
 optimee.setSolution(best);
 }
 // -------------------------------------------------------------------------
 @Override
-public double getProgress() { return (double)rep/(double)reps; }
+public double getProgress() { return (double)(rep)/(double)reps; }
 // -------------------------------------------------------------------------
 public double getFraction() { return bestScore/startScore; }
+// -------------------------------------------------------------------------
+public boolean running() { return (rep!=0); }
 // -------------------------------------------------------------------------
 }
