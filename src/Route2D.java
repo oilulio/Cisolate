@@ -49,10 +49,6 @@ static final String nL = System.getProperty("line.separator");
 static int solved=0;
 static Points2D rawJunctions;
 static Points2D smoothJunctions;
-static {
-  rawJunctions   =new Points2D();
-  smoothJunctions=new Points2D();
-}
 
 public static void initialise(int [][] slastTouch,
           double sxOrigin,double syOrigin,
@@ -63,6 +59,9 @@ xOrigin=sxOrigin;
 yOrigin=syOrigin;
 xPerPixel=sxPerPixel;
 yPerPixel=syPerPixel;
+rawJunctions   =new Points2D();
+smoothJunctions=new Points2D();
+solved=0;
 }
 
 Route2D(Points2D points)  { super(); this.points=points.points; }

@@ -621,7 +621,7 @@ JMenuItem about=new JMenuItem(new AbstractAction("About Cisolate") {
     style.append("font-size:"+font.getSize()+"pt;");
 
     JEditorPane ep=new JEditorPane("text/html", "<html><body style=\"" + style + "\">" //
-            +"Cisolate V2.0 : PCB trace and drill program.<br>"+
+            +"Cisolate V2.1 : PCB trace and drill program.<br>"+
        "Allowing machine tools to cut PCBs (isolations and drill paths)<br>"+
        "Uses a cellular automata as the base method to extract features.<br><br>"+
        "Converts PCB image into G-code or etch images.  Traces are expanded<br>"+
