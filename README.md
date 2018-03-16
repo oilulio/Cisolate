@@ -13,9 +13,10 @@ Therefore, as stated in the licence
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
-Although I am confident that the technical content of this program is effective 
-(i.e. the isolation paths will be correctly calculated), the GUI is less 
-well developed.
+This has been tested on more than twenty boards and I have good confidence that the 
+technical content of this program is effective (i.e. the isolation paths will 
+be correctly calculated).  Form version 2.0 the GUI is now significantly more
+user friendly.
 
 Details are available at https://oilulio.wordpress.com/2016/01/02/cisolate-pcb-construction/
 
@@ -70,7 +71,7 @@ although sometimes (if Y is compact) it makes more sense to have
 if (X) { do Y; } 
 ```
 
-Hence be alert for single line if statements, with no braces.  
+Hence be alert for single line if statements, perhaps with no braces.  
 
 Extensive use of vertical alignment is also intended to make code clearer by linking
 similar concepts.
