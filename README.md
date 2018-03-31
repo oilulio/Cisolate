@@ -15,7 +15,7 @@ Therefore, as stated in the licence
 
 This has been tested on more than twenty boards and I have good confidence that the 
 technical content of this program is effective (i.e. the isolation paths will 
-be correctly calculated).  Form version 2.0 the GUI is now significantly more
+be correctly calculated).  From version 2.0 onwards the GUI is now significantly more
 user friendly.
 
 Details are available at https://oilulio.wordpress.com/2016/01/02/cisolate-pcb-construction/
@@ -30,7 +30,7 @@ in the console as well as those seen in the GUI.
 Once processing has started on a board, other tabs (initially greyed out) become selectable as the
 different elements of the analysis complete.
 
-Note : The provided jar files for v2.0 are compiled for Java 1.7, and should 
+Note : The provided jar files for v2.1 are compiled for Java 1.7, and should 
 run on that and later JVMs.
 
 <b>Instructions</b>
