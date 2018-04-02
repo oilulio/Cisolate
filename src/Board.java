@@ -40,9 +40,11 @@ static final int CU_WHITE=1;
 static final int CU_BLACK=2;
 static final int CU_GUESS=0;
 static String nL = System.getProperty("line.separator");
-static final String defaultG="G17 G40 G49 G80 G90";
-// G17=x-y plane.  G40=radius compensation off.  G49=length comp off.
-// G80=cancel canned cycle  G90=absolute coordinates
+static final String defaultG="G17 (X-Y plane)"+nL+
+                             "G40 (Radius compensation off)"+nL+
+                             "G49 (Length compensation off)"+nL+
+                             "G80 (Cancel canned cycle)"+nL+
+                             "G90 (Absolute coordinates)";
 
 public BufferedImage  img;    // working, e.g. result of writeBimg
 // **** Always create images in img and copy to final (e.g. drill) when complete
@@ -92,6 +94,7 @@ double millPlunge=-0.3;  // mm, for G Code
 double millTransit=1.0;  // mm, for G Code
 int plungeRate=10; // mm/min
 int millRate=20;   // mm/min
+String sExt=".tap";
 JProgressBar progressBarDrill,resultBarDrill,progressBarDuke;
 JProgressBar progressBarMill,resultBarMill;
 JTextArea taskOutput;
@@ -459,10 +462,32 @@ PathOrder po=skeleton.drills.optimum;
 
 for (int i=0;i<points.size();i++) {
   pw.println("G00 X"+String.format("%.3f",
-       xoffset+skeleton.drills.getX(po.mapping(i))*xmmPerPixel*flipped)+
+       xoffset+points.getX(po.mapping(i))*xmmPerPixel*flipped)+
              "    Y"+String.format("%.3f",
-     -(yoffset+skeleton.drills.getY(po.mapping(i))*ymmPerPixel)));  
+     -(yoffset+points.getY(po.mapping(i))*ymmPerPixel)));  
   pw.println("G01 Z"+String.format("%.3f",plunge));
+  pw.println("G00 Z"+String.format("%.3f",clear));  
+} 
+}
+// ---------------------------------------------------------------
+void writeConstellationCode(PrintWriter pw,double clear,
+                    double plunge,boolean mirror)
+{
+// Note that Screen Y (and hence internal representation) moves from top down and 
+// GCode Y moves from Bottom up - annoying
+
+if (pw==null) return;
+
+if (mirror) xoffset=(img.getWidth()*xmmPerPixel);
+else        xoffset=0.0;
+
+pw.println("G00 Z"+String.format("%.3f",clear));
+
+for (int i=0;i<skeleton.constellation.size();i++) {
+  pw.println("G00 X"+String.format("%.3f",
+       xoffset+skeleton.constellation.getX(i)*xmmPerPixel*((mirror)?-1:1))+
+             "    Y"+String.format("%.3f",
+     -(yoffset+skeleton.constellation.getY(i)*ymmPerPixel)));  
   pw.println("G00 Z"+String.format("%.3f",clear));  
 } 
 }
@@ -916,20 +941,45 @@ if (tsd!=0) {
 } 
 if (!stop && drillCode) {
   try {
-    String fd=mydir+"/drill.tap";
+    String fd=mydir+"/drill."+sExt;
     File fid=new File(fd);
     PrintWriter pwd=new PrintWriter(fid); 
 
     if (!overwrite && fid.exists()) overwriteFail(fd);
-    pwd.println("(G code for drilling of PCB : "+fname+")");
-    pwd.println("("+descriptive+")");
-    pwd.println("(Created "+new Date()+")");
-    pwd.println(defaultG);
-    pwd.println("G21");  // Metric.  
+
+    pwd.println(filePreamble("Gcode for drilling",fname,(flipped<0)));
     pwd.println("F"+Integer.toString(plungeRate));  
-    //pwd.println("M30");  
     writeDrillCode(skeleton.drills,pwd,drillTransit,drillPlunge); 
+    pwd.println("M05 (Spindle off)");  
     pwd.close();
+    
+    fd=mydir+"/constellation."+sExt;
+    fid=new File(fd);
+    pwd=new PrintWriter(fid); 
+
+    if (!overwrite && fid.exists()) overwriteFail(fd);
+
+    pwd.println(filePreamble("Gcode for alignment constellation",fname,false));
+    pwd.println("F"+Integer.toString(plungeRate));  
+    writeConstellationCode(pwd,drillTransit,drillPlunge,false); 
+    pwd.println("M05 (Spindle off)");  
+    pwd.close();
+    
+    fd=mydir+"/noitalletsnoc."+sExt;
+    fid=new File(fd);
+    pwd=new PrintWriter(fid); 
+
+    if (!overwrite && fid.exists()) overwriteFail(fd);
+
+    pwd.println(filePreamble("Gcode for alignment constellation",fname,true));
+    pwd.println("F"+Integer.toString(plungeRate));  
+    writeConstellationCode(pwd,drillTransit,drillPlunge,true); 
+    pwd.println("M05 (Spindle off)");  
+    pwd.close();
+    
+    
+    
+    
   } catch (IOException e) { e.printStackTrace(); System.exit(0); }
 
   copyImage(drill,img); 
@@ -974,31 +1024,22 @@ int cnc_y=0;
 
 if (!stop && millCode) {
   try {
-    String f=mydir+"/smoothIsolation.tap"; 
+    String f=mydir+"/smoothIsolation."+sExt; 
     File fi=new File(f);
     PrintWriter pw=new PrintWriter(fi); // But won't use if raw
 
     if (!raw) {
       if (!overwrite && fi.exists()) overwriteFail(f);
-      pw.println("(G code for smoothed isolation milling of PCB : "+fname+")");
-      pw.println("("+descriptive+")");
-      pw.println("(Created "+new Date()+")");
-      pw.println(defaultG);
-      pw.println("G21");   // Metric.  
+      pw.println(filePreamble("G code for smoothed milling",fname,(flipped<0)));
     }
 
-    String fr=mydir+"/rawIsolation.tap";
+    String fr=mydir+"/rawIsolation."+sExt;
     File fir=new File(fr);
     if (!overwrite && fir.exists()) overwriteFail(fr);
     PrintWriter pwr = new PrintWriter(fir);
 
-    pwr.println("(G code for detailed isolation milling of PCB : "+fname+")");
-    pwr.println("("+descriptive+")");
-    pwr.println("(Created "+new Date()+")");
-
-    pwr.println(defaultG);
-    pwr.println("G21");   // Metric.  
-
+    pwr.println(filePreamble("Gcode for un-smoothed milling",fname,(flipped<0)));
+  
 // Optimiser can choose to cut some traces in the 'reverse' direction to
 // the way we found them.  j>k is the clue.  Note, j=k+1 or k=j+1. Hence j!=k. 
 
@@ -1069,7 +1110,8 @@ if (!stop && millCode) {
     }
 
     if (!raw) {
-      pw.println("M30");  
+      pw.println("G00 Z"+millTransit);
+      pw.println("M05 (Spindle off)");  
       System.out.println(nL+"G code smoothed file is "+
         String.format("%.1f",100.0*(double)fi.length()/fir.length())+
         "% of raw file length.");
@@ -1080,7 +1122,8 @@ if (!stop && millCode) {
 
       pw.close();
     }
-    pwr.println("M30");  
+    pwr.println("G00 Z"+millTransit);
+    pwr.println("M05 (Spindle off)");  
     pwr.close();
   } catch (IOException e) { e.printStackTrace(); System.exit(0); }
 
@@ -1090,10 +1133,10 @@ if (!stop && millCode) {
   // G code generation is very fast, no need to parallelise
   System.out.println(nL+"Start G-code image generation "+new Date());
   if (raw) {
-    gci=new GCodeInterpreter(mydir+"/rawIsolation.tap",
+    gci=new GCodeInterpreter(mydir+"/rawIsolation."+sExt,
          img.getWidth()*xmmPerPixel,img.getHeight()*ymmPerPixel);
   } else { // Use smoothed version if possible
-    gci=new GCodeInterpreter(mydir+"/smoothIsolation.tap",
+    gci=new GCodeInterpreter(mydir+"/smoothIsolation."+sExt,
          img.getWidth()*xmmPerPixel,img.getHeight()*ymmPerPixel);
   }
   System.out.println("End G-code image generation "+new Date()+nL);
@@ -1143,6 +1186,28 @@ try {
   pwl.close();
 } catch (IOException e) { e.printStackTrace(); System.exit(0); }
 
+}
+// ---------------------------------------------------------------
+private String filePreamble(String title,String fname,boolean mirror) {
+
+// Note it appears Grbl fails if any of these lines exceed 80 characters
+// So trap that case for long filenames
+
+StringBuffer sb=new StringBuffer(2000);
+
+sb.append("("+title+" of PCB created from image : )"+nL);
+for (int i=0;i<fname.length();i+=70) {
+  int end=Math.min(i+70,fname.length());
+  sb.append("("+fname.substring(i,end)+((end!=fname.length())?"+++":"")+")"+nL);
+}
+if (mirror) sb.append("(N.B. Gcode is flipped Left-Right from that image)"+nL);
+sb.append("("+descriptive+")"+nL);
+sb.append("(Created by Cisolate V"+Cisolate.version+" on)"+nL);
+sb.append("("+new Date()+")"+nL);
+sb.append(defaultG+nL);
+sb.append("G21 (Metric)");
+
+return sb.toString();
 }
 // ---------------------------------------------------------------
 public class Draggable extends JWindow {
@@ -1310,8 +1375,11 @@ while (gf.hasNext()) {
       }
     }
     else if (line.indexOf("G02")>=0) { // A cw circle
-      if (containsI) {
-        setupCircle(true,true,scaled(xis+iis),scaled(jis),
+      if (containsI) { // This block should currently be redundant - not using I
+        // If the line contains I, it will also contain X and either relate to
+        // a 360 degree circle or a 180 degree semi-circle (Cisolate-specific facts)
+        int deltaX=Math.abs(scaled(xis)-x); // <5 => full circle
+        setupCircle(true,(deltaX<5),scaled(xis+iis),scaled(jis),
             scaled(xis),scaled(yis));
       } else {
         setCentre(scaled(xis),scaled(yis),ris*dpmm,true);
@@ -1320,8 +1388,11 @@ while (gf.hasNext()) {
       while (nextEvent()) { /* Dummy */ }
     }
     else if (line.indexOf("G03")>=0) { // A ccw circle
-      if (containsI) {
-        setupCircle(false,true,scaled(xis+iis),scaled(jis),
+      if (containsI) { // This block should currently be redundant - not using I
+        // If the line contains I, it will also contain X and either relate to
+        // a 360 degree circle or a 180 degree semi-circle (Cisolate-specific facts)
+        int deltaX=Math.abs(scaled(xis)-x); // <5 => full circle
+        setupCircle(false,(deltaX<5),scaled(xis+iis),scaled(jis),
             scaled(xis),scaled(yis));
       } else {
         setCentre(scaled(xis),scaled(yis),ris*dpmm,false);
@@ -1355,7 +1426,12 @@ private void setCentre(int fx,int fy,double radius,boolean cw) {
 double hyp=Math.hypot(fy-y,fx-x);
 
 double fromChord=Math.sqrt(radius*radius-hyp*hyp/4.0);
-
+if (Double.isNaN(fromChord)) { // assume we've just fractionally 
+  // exceeded, so -ve sqrt.   Hence this is a diameter. Hence ...
+  ii=(x+fx)/2;
+  jj=(y+fy)/2;
+  return;
+}
 double intermedX=(fx+x)/2.0;
 double intermedY=(fy+y)/2.0;
 

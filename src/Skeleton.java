@@ -40,6 +40,7 @@ class Skeleton {
 // loops can create electrical isolation.  Beware if reusing class.
 
 public Points2D drills;
+public Points2D constellation;  // subset of drills as pattern for alignment
 public Points2D threeWays;
 public Points2D fourWays;
 public Lines2D transits;
@@ -146,9 +147,10 @@ pass=DONE;
 //   3 Three-way junction
 //   4 Four-way junction.
 
-drills   =new Points2D(); 
-threeWays=new Points2D();
-fourWays =new Points2D();
+drills       =new Points2D(); 
+constellation=new Points2D(); 
+threeWays    =new Points2D();
+fourWays     =new Points2D();
 
 for (int y=1;y<(height-1);y++) { 
   if (board.stop) return;
@@ -199,6 +201,62 @@ if (board.stop) return;
   }
 }
 transits=new Lines2D(endPairs());  // For mill route optimisation
+
+// Setup a subset of drill points to assist with board alignment on
+// a machine (especially to align two sided boards)
+// Look for fairly extreme points to give good orientation
+// Includes all those that are at the extreme E,N,S and W positions and
+// (as long as points exist in those quadrants) the longest NE-SW and
+// NW-SE diagonals
+
+int minx=Integer.MAX_VALUE;
+int maxx=Integer.MIN_VALUE;
+int miny=Integer.MAX_VALUE;
+int maxy=Integer.MIN_VALUE;
+
+for (Point2D d : drills) {  // Bounding box
+  if (d.getX()>maxx) maxx=d.getX();
+  if (d.getX()<minx) minx=d.getX();
+  if (d.getY()>maxy) maxy=d.getY();
+  if (d.getY()<miny) miny=d.getY();
+}
+int maxNWSE=0;
+int maxSWNE=0;
+Point2D NW=null;
+Point2D NE=null;
+Point2D SW=null;
+Point2D SE=null;
+
+for (Point2D d0 : drills) {  
+  if (d0.getX()>((minx+maxx)/2)) continue; // Want one on LHS
+  for (Point2D d1 : drills) {  
+    if (d1.getX()<((minx+maxx)/2)) continue; // Want one on RHS
+    int dist=(int)(0.5+Math.sqrt(Math.pow(d0.getX()-d1.getX(),2)+Math.pow(d0.getY()-d1.getY(),2)));
+    if (d0.getY()>((miny+maxy)/2)) {  // SW
+      if (dist>maxSWNE) {
+        SW=new Point2D(d0);
+        NE=new Point2D(d1);
+        maxSWNE=dist;
+      }  
+    } else { // NW
+      if (dist>maxNWSE) {
+        NW=new Point2D(d0);
+        SE=new Point2D(d1);
+        maxNWSE=dist;
+      }  
+    }
+  }
+}
+if (NW!=null) constellation.add(NW);  
+if (SE!=null) constellation.add(SE);  
+if (SW!=null) constellation.add(SW);  
+if (NE!=null) constellation.add(NE);  
+for (Point2D d : drills) {  
+  if (d.getX()==minx || d.getX()==maxx ||
+      d.getY()==miny || d.getY()==maxy) {
+    constellation.add(d);          
+  }
+}
 }
 // ------------------------------------------------------------------------
 public final Points2D endPairs() 

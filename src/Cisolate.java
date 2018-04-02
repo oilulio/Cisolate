@@ -87,9 +87,18 @@ Disadvantages/Weaknesses
      (e.g. input should be 24 bit colour)
  5.  Gcode output will be METRIC (G21)
 
+Changes in V2.2
+ 1.  Gcode file extension now selectable
+ 2.  Compatible with some quirks of Grbl (e.g. line lengths, circle specification)
+ 3.  Retracts tool and issues M5 (Spindle Stop) at end of run
+ 4.  Backlash circles are now 450 degrees to ensure isolation
+ 5.  Produces matching unflipped/flipped files constellation/noitalletsnoc to help
+     align two-sided boards.
+ 
 */
 
 private static final long serialVersionUID = 1L;
+public static final String version="2.2";
 
 private static final String nL = System.getProperty("line.separator");
 
@@ -163,6 +172,8 @@ private BufferedImage blank;
 private int forceDPI=0;  // 0 = use natural DPI
 private boolean cuWhite=false;
 private static boolean flipped=false;
+private String [] fileExts={"tap","nc","ncc","cnc","fnc","txt"};
+private int fileExt=0;
 
 private JButton processButton;
 protected boolean processing=false;
@@ -234,6 +245,8 @@ millTransit=prefs.getDouble("MILL_TRANSIT",1.0);   // mm, for G Code
 backlash=prefs.getDouble("BACKLASH",0.4);          // mm, for G Code
 doBacklash=prefs.getBoolean("DO_BACKLASH",false);          
 
+fileExt=prefs.getInt("FILE_EXT",0);          
+
 at =new AffineTransform();
 atG=new AffineTransform();
 
@@ -287,7 +300,7 @@ final JMenuItem jmImgSettings=new JMenuItem(new AbstractAction("Image Settings")
     radioGroup.add(copperColourB);
     radioGroup.add(copperColourW);
 
-    JCheckBox checkbox=new JCheckBox("Flip board image");
+    JCheckBox checkbox=new JCheckBox("Flip board Left-Right");
 
     final JPanel myPanel=new JPanel();
     myPanel.setLayout(new BoxLayout(myPanel,BoxLayout.Y_AXIS));
@@ -387,6 +400,19 @@ final JMenuItem jmGSettings=new JMenuItem(new AbstractAction("G Code Settings") 
     myPanel.add(new JLabel("Backlash compensation radius (mm):"));
     myPanel.add(backlashField);
     myPanel.add(checkbox);
+
+    final JPanel radioPanel = new JPanel();
+    radioPanel.setBorder(BorderFactory.createTitledBorder(
+           BorderFactory.createEtchedBorder(),"Select GCode file extension"));
+    
+    ButtonGroup radioGroup=new ButtonGroup();
+    JRadioButton [] extensions=new JRadioButton[fileExts.length];
+    for (int i=0;i<fileExts.length;i++) {
+      extensions[i]=new JRadioButton(fileExts[i],(i==fileExt));
+      radioGroup.add(extensions[i]);
+      radioPanel.add(extensions[i]);
+    }
+    myPanel.add(radioPanel);
     
     int result=JOptionPane.showConfirmDialog(frame,myPanel,
           "G Code parameters",JOptionPane.OK_CANCEL_OPTION); 
@@ -401,6 +427,10 @@ final JMenuItem jmGSettings=new JMenuItem(new AbstractAction("G Code Settings") 
       backlash=Double.parseDouble(backlashField.getText());
       doBacklash=checkbox.isSelected();
 
+      for (int i=0;i<fileExts.length;i++) {
+        if (extensions[i].isSelected()) fileExt=i;
+      }
+      
       prefs.putInt("PLUNGE_RATE",plungeRate); 
       prefs.putInt("MILL_RATE",millRate);
       
@@ -411,8 +441,10 @@ final JMenuItem jmGSettings=new JMenuItem(new AbstractAction("G Code Settings") 
       
       prefs.putDouble("BACKLASH",backlash); 
       prefs.putBoolean("DO_BACKLASH",doBacklash); 
+
+      prefs.putInt("FILE_EXT",fileExt); 
     }
-   }
+  }
 });
 
 final JMenuItem jmEtchSettings=new JMenuItem(new AbstractAction("Etch Settings") {
@@ -587,6 +619,9 @@ JMenuItem tips=new JMenuItem(new AbstractAction("Hints and Tips") {
       "is not from that perspective (e.g. with top and bottom images of"+nL+
       "boards that can be overlaid, one must be flipped/mirrored to get"+nL+
       "that perspective)"+nL+nL+
+      "The Constellation file will always be from the orientation of the"+nL+
+      "unflipped board, and vice-versa for Noitalletsnoc file, even if"+nL+
+      "the board is flipped"+nL+nL+
       "Some boards need more than the default 20 iterations to fully optimise paths"+nL+
       "and computer time is likely a better investment that machine time."+nL+nL+ 
       "Once processing has started on a board, other tabs (initially greyed out) become"+nL+
@@ -621,7 +656,7 @@ JMenuItem about=new JMenuItem(new AbstractAction("About Cisolate") {
     style.append("font-size:"+font.getSize()+"pt;");
 
     JEditorPane ep=new JEditorPane("text/html", "<html><body style=\"" + style + "\">" //
-            +"Cisolate V2.1 : PCB trace and drill program.<br>"+
+            +"Cisolate V"+version+" : PCB trace and drill program.<br>"+
        "Allowing machine tools to cut PCBs (isolations and drill paths)<br>"+
        "Uses a cellular automata as the base method to extract features.<br><br>"+
        "Converts PCB image into G-code or etch images.  Traces are expanded<br>"+
@@ -913,6 +948,7 @@ processButton.addActionListener(new ActionListener() {
     board.etch = etching.isSelected()?etchWidth:0; 
     board.verbose = images.isSelected(); 
     board.copper=cuWhite?Board.CU_WHITE:Board.CU_BLACK;
+    board.sExt=fileExts[fileExt];
     
     if (board.edgeIsMixed()) {
       if (JOptionPane.showConfirmDialog(frame,"The image border is neither solid "+nL+

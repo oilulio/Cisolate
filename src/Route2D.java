@@ -290,6 +290,10 @@ String addBacklashTolerance(int x,int y,double radius,
 // in cases where machine inaccuracy/backlash means they do not
 // exactly meet.
 
+// Idea TODO?  Would it be better to do half clockwise/half anti-clockwise
+// on the theory that it may prevent backlash compounding and/or even out
+// machine wear?
+
 StringBuilder result=new StringBuilder("");
 
 result.append("G00 Z"+millTransit+nL);
@@ -299,7 +303,30 @@ result.append("G00 X"+
 result.append("F"+plungeRate+nL);
 result.append("G01 Z"+millPlunge+nL);
 result.append("F"+millRate+nL);
-result.append("G02 I"+String.format(fstr,(-radius))+nL);
+
+//Next line not suitable for Grbl, so changed
+//result.append("G02 I"+String.format(fstr,(-radius))+nL);
+
+/* Removed in favour of next block
+// Some G-Code interpreters (e.g. grbl) seem to insist that both X & I are
+// specified on the same line for a full circle, although strictly X is redundant 
+result.append("G02 X"+String.format(fstr,xOrigin+xPerPixel*x+radius));
+result.append(" I"+String.format(fstr,(-radius))+nL);
+*/
+
+// Construct full circle as two semi-circles to avoid problems some G-Code
+// interpreters seem to have with full circles.
+result.append("G02 X"+String.format(fstr,xOrigin+xPerPixel*x-radius)+
+                 " Y"+String.format(fstr,-(yOrigin+yPerPixel*y))+
+                 " R"+String.format(fstr,radius)+nL);
+result.append("G02 X"+String.format(fstr,xOrigin+xPerPixel*x+radius)+
+                 " Y"+String.format(fstr,-(yOrigin+yPerPixel*y))+
+                 " R"+String.format(fstr,radius)+nL);
+// Add extra 1/4 circle arc to ensure any tool-drag is compensated for
+result.append("G02 X"+String.format(fstr,  xOrigin+xPerPixel*x)+
+                 " Y"+String.format(fstr,-(yOrigin+yPerPixel*y+radius))+
+                 " R"+String.format(fstr,radius)+nL);
+
 result.append("G00 Z"+millTransit+nL);
 result.append("G00 X"+
         String.format(fstr,  xOrigin+xPerPixel*x)+
