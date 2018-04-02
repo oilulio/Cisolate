@@ -30,7 +30,7 @@ in the console as well as those seen in the GUI.
 Once processing has started on a board, other tabs (initially greyed out) become selectable as the
 different elements of the analysis complete.
 
-Note : The provided jar files for v2.1 are compiled for Java 1.7, and should 
+Note : The provided jar files for v2.2 are compiled for Java 1.7, and should 
 run on that and later JVMs.
 
 <b>Instructions</b>
