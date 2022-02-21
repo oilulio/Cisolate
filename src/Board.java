@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2016-18  S Combes
+Copyright (C) 2016-22  S Combes
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -29,6 +29,8 @@ import javax.imageio.*;
 import javax.imageio.metadata.*;
 import javax.imageio.stream.*;
 import java.util.concurrent.*;
+import java.text.NumberFormat;
+import java.text.ParseException;
 
 class Board extends Observable implements Runnable {
 
@@ -60,7 +62,7 @@ int xsize,ysize;
 private File mydir;
 private File file;
 private JFrame frame;
-boolean verbose,raw,overwrite,doBacklash;
+boolean verbose,raw,overwrite,doBacklash,relieved;
 int flipped=1; // 1=Not; -1=L-R flip.
 // Flipped is  L-R mirror.  All internal calcs done un-flipped,
 // and output images unaffected (but G-code is flipped as this is critcial). 
@@ -76,7 +78,7 @@ private double xoffset=0.0;
 private double yoffset=0.0;  // Board coordinates of TL pixel (mm)
 protected int forceDPI;
 private int nativexDPI,nativeyDPI; // As per the image file
-private int xDPI,yDPI;             // Used for our analysis
+protected int xDPI,yDPI;             // Used for our analysis
 private ImageWriter writer;
 private String descriptive;
 public StringBuilder log;
@@ -135,6 +137,7 @@ this.etch=etch;
 this.overwrite=overwrite;
 this.forceDPI=forceDPI;
 complete=false;
+descriptive="";
 
 log=new StringBuilder();
 imgProperties=new StringBuffer();
@@ -193,7 +196,7 @@ if (ext.equals("jpg")) {
 
     dis.close();
 
-  } catch (IOException e) { System.out.println("File Read Error"); System.exit(0);} 
+  } catch (IOException e) { System.out.println("File Read Error"); e.printStackTrace(); System.exit(0);} 
 } 
 else if (forceDPI == 0) {
   System.out.println("Currently only supports .jpg and .bmp unless DPI is forced.  Exiting");
@@ -279,24 +282,24 @@ if (scale<1.0) scale=1.0;
 xsize=(int)(img.getWidth()/scale);
 ysize=(int)(img.getHeight()/scale);
 
-descriptive=String.format("Board is approximately %.1f x %.1f inches",
-          (double)img.getWidth()/nativexDPI,(double)img.getHeight()/nativeyDPI);
+descriptive+=String.format("Board is approximately %.1f x %.1f inches",
+          (double)img.getWidth()/nativexDPI,(double)img.getHeight()/nativeyDPI)+nL;
 if (nativexDPI!=xDPI || nativeyDPI!=yDPI) 
   descriptive+=String.format("Remapped to approximately %.1f x %.1f inches",
-          (double)img.getWidth()/xDPI,(double)img.getHeight()/yDPI);
+          (double)img.getWidth()/xDPI,(double)img.getHeight()/yDPI)+nL;
   
 
 System.out.println(descriptive); // Mostly to trap obvious bloopers
-log.append(descriptive+nL);
-imgProperties.append(descriptive+nL);
+log.append(descriptive);
+//imgProperties.append(descriptive);
 
 if (mixedEdge) {
-  descriptive="***********************************************"+nL+
+  descriptive+="***********************************************"+nL+
   "Board has an outermost pixel surround that is neither "+nL+
-  "wholly copper nor wholly clear.  This is likely to lead to unexpected"+nL+
-  "results."+nL+"***********************************************";
-  log.append(descriptive+nL);
-  imgProperties.append(descriptive+nL);
+  "wholly copper nor wholly clear.  This is likely to lead "+nL+
+  "to unexpected results."+nL+"***********************************************"+nL;
+  log.append(descriptive);
+  //imgProperties.append(descriptive);
 }
 
 // mydir = filename pre extension tagged on our path
@@ -312,14 +315,14 @@ if (!mydir.exists())
 private void updateDrill() {
 if (anneal.running()) {
   progressBarDrill.setValue((int)(100.0*anneal.getProgress()));
-  resultBarDrill.setValue((int)(100.0-100.0*anneal.getFraction()));
+  resultBarDrill.setValue((int)(100.0*anneal.getFraction()));
 } 
 }
 // ---------------------------------------------------------------
 private void updateMill() {
 if (annealPair.running()) {
   progressBarMill.setValue((int)(100.0*annealPair.getProgress()));                  
-  resultBarMill.setValue((int)(100.0-100.0*annealPair.getFraction()));
+  resultBarMill.setValue((int)(100.0*annealPair.getFraction()));
 }  
 }
 // ---------------------------------------------------------------
@@ -363,7 +366,8 @@ if (map!=null) {
     Node attribute=map.item(j);
     String name=attribute.getNodeName();
     if (name.equals(attrib))  
-      result=Double.parseDouble(attribute.getNodeValue());
+	  try { result=NumberFormat.getInstance(Locale.getDefault()).parse(attribute.getNodeValue()).doubleValue(); }
+      catch (ParseException e) { System.out.println("Attribute Error"); e.printStackTrace(); System.exit(0);} 
   }
 }
 return result;
@@ -456,17 +460,17 @@ if (pw==null) return;
 if (flipped<0) xoffset=(img.getWidth()*xmmPerPixel);
 else           xoffset=0.0;
 
-pw.println("G00 Z"+String.format("%.3f",clear));
+pw.println("G00 Z"+String.format(Locale.US,"%.3f",clear));
 
 PathOrder po=skeleton.drills.optimum;
 
 for (int i=0;i<points.size();i++) {
-  pw.println("G00 X"+String.format("%.3f",
+  pw.println("G00 X"+String.format(Locale.US,"%.3f",
        xoffset+points.getX(po.mapping(i))*xmmPerPixel*flipped)+
-             "    Y"+String.format("%.3f",
+             "    Y"+String.format(Locale.US,"%.3f",
      -(yoffset+points.getY(po.mapping(i))*ymmPerPixel)));  
-  pw.println("G01 Z"+String.format("%.3f",plunge));
-  pw.println("G00 Z"+String.format("%.3f",clear));  
+  pw.println("G01 Z"+String.format(Locale.US,"%.3f",plunge));
+  pw.println("G00 Z"+String.format(Locale.US,"%.3f",clear));  
 } 
 }
 // ---------------------------------------------------------------
@@ -481,14 +485,14 @@ if (pw==null) return;
 if (mirror) xoffset=(img.getWidth()*xmmPerPixel);
 else        xoffset=0.0;
 
-pw.println("G00 Z"+String.format("%.3f",clear));
+pw.println("G00 Z"+String.format(Locale.US,"%.3f",clear));
 
 for (int i=0;i<skeleton.constellation.size();i++) {
-  pw.println("G00 X"+String.format("%.3f",
+  pw.println("G00 X"+String.format(Locale.US,"%.3f",
        xoffset+skeleton.constellation.getX(i)*xmmPerPixel*((mirror)?-1:1))+
-             "    Y"+String.format("%.3f",
+             "    Y"+String.format(Locale.US,"%.3f",
      -(yoffset+skeleton.constellation.getY(i)*ymmPerPixel)));  
-  pw.println("G00 Z"+String.format("%.3f",clear));  
+  pw.println("G00 Z"+String.format(Locale.US,"%.3f",clear));  
 } 
 }
 // ---------------------------------------------------------------
@@ -669,12 +673,12 @@ if (forceDPI !=0) {
   yDPI=forceDPI;
   System.out.println("*********** Forcing DPI to be "+forceDPI);
   log.append("DPI was forced to be "+forceDPI+nL);
-  descriptive=String.format("Board is therefore approximately %.1f x %.1f inches",
+  descriptive="DPI was forced to be "+forceDPI+nL;
+  descriptive+=String.format("Board is therefore approximately %.1f x %.1f inches",
           (double)img.getWidth()/xDPI,(double)img.getHeight()/yDPI);
 
-  System.out.println(descriptive); // Mostly to trap obvious bloopers
   log.append(descriptive+nL);
-  imgProperties.append("Forced DPI to "+forceDPI+nL+descriptive+nL);
+  imgProperties.append(descriptive+nL);
 }
 if (!millCode)  tsm=0;  // Zero optimisations if we're not doing the code
 if (!drillCode) tsd=0; 
@@ -684,7 +688,7 @@ progressBarDrill.setValue(0);
 progressBarDrill.setStringPainted(true);
 
 resultBarDrill=new JProgressBar(0,100);
-resultBarDrill.setValue(0);
+resultBarDrill.setValue(100);
 resultBarDrill.setStringPainted(true);
 
 progressBarMill=new JProgressBar(0,100);
@@ -692,7 +696,7 @@ progressBarMill.setValue(0);
 progressBarMill.setStringPainted(true);
 
 resultBarMill=new JProgressBar(0,100);
-resultBarMill.setValue(0);
+resultBarMill.setValue(100);
 resultBarMill.setStringPainted(true);
 
 progressBarDuke=new JProgressBar(0,100);
@@ -706,7 +710,7 @@ drillPanel.setLayout(new GridLayout(2,2,7,2));
 drillPanel.add(new JLabel("<html>Drill optimsation progress</html>",
                   SwingConstants.RIGHT)); // html allows wrap
 drillPanel.add(progressBarDrill);
-drillPanel.add(new JLabel("<html>Reduction achieved</html>",
+drillPanel.add(new JLabel("<html>Filesize</html>",
                   SwingConstants.RIGHT));
 drillPanel.add(resultBarDrill);
 
@@ -717,7 +721,7 @@ millPanel.setLayout(new GridLayout(2,2,7,2));
 millPanel.add(new JLabel("<html>Mill optimsation progress</html>",
                   SwingConstants.RIGHT));
 millPanel.add(progressBarMill);
-millPanel.add(new JLabel("<html>Reduction achieved</html>",
+millPanel.add(new JLabel("<html>Filesize</html>",
                   SwingConstants.RIGHT));
 millPanel.add(resultBarMill);
 
@@ -1188,6 +1192,26 @@ try {
 
 }
 // ---------------------------------------------------------------
+private String forceGComment(String input) { 
+// Formats an input string into a GCode comment, multi-line if required
+// i.e. if the form "(....)+nL" repeated.
+
+StringBuffer sb=new StringBuffer(1000);
+
+int index=0;
+while (index<input.length()) {
+  sb.append("(");
+  int end=input.substring(index).indexOf(nL);
+  if (end<0) end=input.length();
+  else end+=index;
+  System.out.println(input.substring(index,end));
+  sb.append(input.substring(index,end));
+  sb.append(")"+nL);
+  index=end+nL.length();
+}
+return sb.toString();
+}
+// ---------------------------------------------------------------
 private String filePreamble(String title,String fname,boolean mirror) {
 
 // Note it appears Grbl fails if any of these lines exceed 80 characters
@@ -1201,7 +1225,7 @@ for (int i=0;i<fname.length();i+=70) {
   sb.append("("+fname.substring(i,end)+((end!=fname.length())?"+++":"")+")"+nL);
 }
 if (mirror) sb.append("(N.B. Gcode is flipped Left-Right from that image)"+nL);
-sb.append("("+descriptive+")"+nL);
+sb.append(forceGComment(descriptive));
 sb.append("(Created by Cisolate V"+Cisolate.version+" on)"+nL);
 sb.append("("+new Date()+")"+nL);
 sb.append(defaultG+nL);
@@ -1310,6 +1334,7 @@ GCodeInterpreter(String filename,double xsize,double ysize) {
 
 int wi=(int)(xsize*dpmm/2);
 int hi=(int)(ysize*dpmm/2);
+System.out.println(xsize+" "+wi+" "+ysize+" "+hi);
 bi=new BufferedImage(wi,hi,BufferedImage.TYPE_3BYTE_BGR);
 dividing=(int)(0.5+dpmm*(millPlunge+millTransit)/2.0);
 Gfile gf=new Gfile(filename);
@@ -1333,7 +1358,6 @@ while (gf.hasNext()) {
     if (brack<0) brack=0;
   }
   line=sb.toString().toUpperCase();  // Case insensitive for rest
-  // System.out.println(">>>> "+line);
   int xat=line.indexOf("X");
   int yat=line.indexOf("Y");
   int zat=line.indexOf("Z");
@@ -1446,7 +1470,11 @@ private double getNo(String sub)
 {
 int end=sub.indexOf(" ");
 if (end<0) end=sub.length();
-return Double.parseDouble(sub.substring(0,end));
+double result=0.0;
+try {result=
+NumberFormat.getInstance(Locale.getDefault()).parse(sub.substring(0,end)).doubleValue(); }
+catch (ParseException e) { System.out.println("internal Error"); e.printStackTrace(); System.exit(0);} 
+return result;
 }
 // ---------------------------------------------------------------
 private int getInt(String sub)

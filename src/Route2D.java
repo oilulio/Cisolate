@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2016-18  S Combes, with thanks to jasoroony for correction.
+Copyright (C) 2016-22  S Combes, with thanks to jasoroony for correction.
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -19,7 +19,8 @@ package cisolate;
 
 import java.util.List;
 import java.util.ArrayList;
-import java.awt.*; 
+import java.awt.*;
+import java.util.Locale;
 
 // Despite title, this Class is not generic - it is closely bound to
 // Cisolate, because the 'heat map' input is unlikely to be produced elsewhere.
@@ -184,10 +185,10 @@ if (reversed) {
 if (!attached) {
   result.append("G00 Z"+millTransit+nL);
   result.append("G00 X"+
-        String.format(fstr,  xOrigin+xPerPixel*cp.control.getX(start))+
-   " Y"+String.format(fstr,-(yOrigin+yPerPixel*cp.control.getY(start)))+nL);
+        String.format(Locale.US,fstr,  xOrigin+xPerPixel*cp.control.getX(start))+
+   " Y"+String.format(Locale.US,fstr,-(yOrigin+yPerPixel*cp.control.getY(start)))+nL);
   result.append("F"+plungeRate+nL);
-  result.append("G01 Z"+millPlunge+nL);
+  result.append(String.format(Locale.US,"G01 Z"+fstr+"%s",millPlunge,nL));
   result.append("F"+millRate+nL);
 }
 
@@ -205,14 +206,14 @@ for (int i=start;i!=end;i+=inc) {
   int myArc=i+(reversed?-1:0);
   if (Math.abs(cp.arcRadius.get(myArc))>=MAXRADIUS) {
     result.append("G01 X"+
-         String.format(fstr,  xOrigin+xPerPixel*cp.control.getX(i+inc))+
-    " Y"+String.format(fstr,-(yOrigin+yPerPixel*cp.control.getY(i+inc)))+nL);
+         String.format(Locale.US,fstr,  xOrigin+xPerPixel*cp.control.getX(i+inc))+
+    " Y"+String.format(Locale.US,fstr,-(yOrigin+yPerPixel*cp.control.getY(i+inc)))+nL);
   } else {
     String hand=((xPerPixel<0)^reversed^(cp.arcRadius.get(myArc)>0.0))?"G03 ":"G02 "; 
     result.append(hand+"X"+ // Corrected thanks to jasoroony
-          String.format(fstr,  xOrigin+xPerPixel*cp.control.getX(i+inc))+
-     " Y"+String.format(fstr,-(yOrigin+yPerPixel*cp.control.getY(i+inc)))+
-     " R"+String.format(fstr,yPerPixel*Math.abs(cp.arcRadius.get(myArc)))+nL);
+          String.format(Locale.US,fstr,  xOrigin+xPerPixel*cp.control.getX(i+inc))+
+     " Y"+String.format(Locale.US,fstr,-(yOrigin+yPerPixel*cp.control.getY(i+inc)))+
+     " R"+String.format(Locale.US,fstr,yPerPixel*Math.abs(cp.arcRadius.get(myArc)))+nL);
 // TODO later allow for different x,y scales
   }
 } 
@@ -228,7 +229,7 @@ g2d.setColor(colour);
 
 for (int i=0;i!=cp.getArcs();i++) {  
 
-  CircularArc ca = new CircularArc(cp.arcRadius.get(i)>0.0,
+  QuantisedCircularArc ca = new QuantisedCircularArc(cp.arcRadius.get(i)>0.0,
     cp.control.get(i),cp.control.get(i+1),Math.abs(cp.arcRadius.get(i)));
 
   for (Point2D point : ca) 
@@ -258,12 +259,12 @@ if (reversed) {
 }
 
 if (!attached) {
-  result.append("G00 Z"+millTransit+nL);
+  result.append(String.format(Locale.US,"G00 Z"+fstr+"%s",millTransit,nL));
   result.append("G00 X"+
-        String.format(fstr,  xOrigin+xPerPixel*getX(start))+
-   " Y"+String.format(fstr,-(yOrigin+yPerPixel*getY(start)))+nL);
+        String.format(Locale.US,fstr,  xOrigin+xPerPixel*getX(start))+
+   " Y"+String.format(Locale.US,fstr,-(yOrigin+yPerPixel*getY(start)))+nL);
   result.append("F"+plungeRate+nL);
-  result.append("G01 Z"+millPlunge+nL);
+  result.append(String.format(Locale.US,"G01 Z"+fstr+"%s",millPlunge,nL));
   result.append("F"+millRate+nL);
 }
 for (int i=start;i!=end;i+=inc) {
@@ -277,8 +278,8 @@ for (int i=start;i!=end;i+=inc) {
               millRate,plungeRate,millPlunge,millTransit));
   }
   result.append("G01 X"+
-       String.format(fstr,  xOrigin+xPerPixel*getX(i+inc))+
-  " Y"+String.format(fstr,-(yOrigin+yPerPixel*getY(i+inc)))+nL);
+       String.format(Locale.US,fstr,  xOrigin+xPerPixel*getX(i+inc))+
+  " Y"+String.format(Locale.US,fstr,-(yOrigin+yPerPixel*getY(i+inc)))+nL);
 } 
 return new String(result);
 } 
@@ -296,43 +297,44 @@ String addBacklashTolerance(int x,int y,double radius,
 
 StringBuilder result=new StringBuilder("");
 
-result.append("G00 Z"+millTransit+nL);
+result.append(String.format(Locale.US,"G00 Z"+fstr+"%s",millTransit,nL));
 result.append("G00 X"+
-        String.format(fstr,  xOrigin+xPerPixel*x+radius)+ // radius in mm so no scale
-   " Y"+String.format(fstr,-(yOrigin+yPerPixel*y))+nL);
+        String.format(Locale.US,fstr,  xOrigin+xPerPixel*x+radius)+ // radius in mm so no scale
+   " Y"+String.format(Locale.US,fstr,-(yOrigin+yPerPixel*y))+nL);
 result.append("F"+plungeRate+nL);
-result.append("G01 Z"+millPlunge+nL);
+result.append(String.format(Locale.US,"G01 Z"+fstr+"%s",millPlunge,nL));
 result.append("F"+millRate+nL);
 
 //Next line not suitable for Grbl, so changed
-//result.append("G02 I"+String.format(fstr,(-radius))+nL);
+//result.append("G02 I"+String.format(Locale.US,fstr,(-radius))+nL);
 
 /* Removed in favour of next block
 // Some G-Code interpreters (e.g. grbl) seem to insist that both X & I are
 // specified on the same line for a full circle, although strictly X is redundant 
-result.append("G02 X"+String.format(fstr,xOrigin+xPerPixel*x+radius));
-result.append(" I"+String.format(fstr,(-radius))+nL);
+result.append("G02 X"+String.format(Locale.US,fstr,xOrigin+xPerPixel*x+radius));
+result.append(" I"+String.format(Locale.US,fstr,(-radius))+nL);
 */
 
 // Construct full circle as two semi-circles to avoid problems some G-Code
 // interpreters seem to have with full circles.
-result.append("G02 X"+String.format(fstr,xOrigin+xPerPixel*x-radius)+
-                 " Y"+String.format(fstr,-(yOrigin+yPerPixel*y))+
-                 " R"+String.format(fstr,radius)+nL);
-result.append("G02 X"+String.format(fstr,xOrigin+xPerPixel*x+radius)+
-                 " Y"+String.format(fstr,-(yOrigin+yPerPixel*y))+
-                 " R"+String.format(fstr,radius)+nL);
+result.append("G02 X"+String.format(Locale.US,fstr,xOrigin+xPerPixel*x-radius)+
+                 " Y"+String.format(Locale.US,fstr,-(yOrigin+yPerPixel*y))+
+                 " R"+String.format(Locale.US,fstr,radius)+nL);
+result.append("G02 X"+String.format(Locale.US,fstr,xOrigin+xPerPixel*x+radius)+
+                 " Y"+String.format(Locale.US,fstr,-(yOrigin+yPerPixel*y))+
+                 " R"+String.format(Locale.US,fstr,radius)+nL);
 // Add extra 1/4 circle arc to ensure any tool-drag is compensated for
-result.append("G02 X"+String.format(fstr,  xOrigin+xPerPixel*x)+
-                 " Y"+String.format(fstr,-(yOrigin+yPerPixel*y+radius))+
-                 " R"+String.format(fstr,radius)+nL);
+result.append("G02 X"+String.format(Locale.US,fstr,  xOrigin+xPerPixel*x)+
+                 " Y"+String.format(Locale.US,fstr,-(yOrigin+yPerPixel*y+radius))+
+                 " R"+String.format(Locale.US,fstr,radius)+nL);
 
-result.append("G00 Z"+millTransit+nL);
+result.append(String.format(Locale.US,"G00 Z"+fstr+"%s",millTransit,nL));
 result.append("G00 X"+
-        String.format(fstr,  xOrigin+xPerPixel*x)+
-   " Y"+String.format(fstr,-(yOrigin+yPerPixel*y))+nL);
+        String.format(Locale.US,fstr,  xOrigin+xPerPixel*x)+
+   " Y"+String.format(Locale.US,fstr,-(yOrigin+yPerPixel*y))+nL);
 result.append("F"+plungeRate+nL);
-result.append("G01 Z"+millPlunge+nL);
+result.append(String.format(Locale.US,"G01 Z"+fstr+"%s",millPlunge,nL));
+result.append("F"+millRate+nL);
 
 return new String(result);
 } 
@@ -399,7 +401,7 @@ boolean optimiseArc(Point2D start,Point2D end)
     nexthanded:
     for (int handedness=0;handedness<2;handedness++) {
 
-      CircularArc ca = new CircularArc(handedness==0,
+      QuantisedCircularArc ca = new QuantisedCircularArc(handedness==0,
                              start,end,radius);
 
       double score=0.0;

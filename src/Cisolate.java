@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2016-2018  S Combes
+Copyright (C) 2016-2022  S Combes
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -33,6 +33,9 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import java.util.prefs.Preferences;
 import java.util.Observer;
 import java.util.Observable;
+import java.util.Locale;
+import java.text.NumberFormat;
+import java.text.ParseException;
 
 class Cisolate extends Component  {
 
@@ -60,8 +63,8 @@ class Cisolate extends Component  {
 // one processor).  Partly for this reason, prints a summary at the end.
 
 // Code is compilable at various Java versions, but uses 'observer' which
-// is deprecated in Java 9.  Currently recommended compilation is at Java 7
-// which allows use on existing JVM machines 7,8,9 (and probably 10+).
+// is deprecated in Java 9.  Currently recommended compilation is at Java 8
+// which allows use on existing JVM machines 8,9+.
 
 /* Cisolate advantages.
 
@@ -94,11 +97,22 @@ Changes in V2.2
  4.  Backlash circles are now 450 degrees to ensure isolation
  5.  Produces matching unflipped/flipped files constellation/noitalletsnoc to help
      align two-sided boards.
+
+Changes in V2.3
+ 1.  File size reduction is shown starting at 100% and reducing, to avoid confusion with a
+ progress bar that should reach 100%.
+ 2.  Now able to use on machines whose Locale is set to use commas as the decimal separator,
+ without affecting produced GCode (which is assumed to use US format decimal for comma)
+ 3. Avoids long comments that can crash some G-Code interpreters
+
+Planned changes
+ 1.  Option to include 'thermal relief' pad design to ease soldering large areas of 
+ copper (some stub code in 2.3)
  
 */
 
 private static final long serialVersionUID = 1L;
-public static final String version="2.2";
+public static final String version="2.3";
 
 private static final String nL = System.getProperty("line.separator");
 
@@ -116,6 +130,7 @@ private StringBuffer log;
 private StringBuffer imgProperties;
 private boolean millCode=true;
 private boolean drillCode=true;
+private boolean GCodeDecimalIsDot=true;
 private int assessedCu=Board.CU_GUESS;
 private BufferedImage img;
 private Board board;
@@ -172,6 +187,7 @@ private BufferedImage blank;
 private int forceDPI=0;  // 0 = use natural DPI
 private boolean cuWhite=false;
 private static boolean flipped=false;
+private boolean relieved=false; // Stub code
 private String [] fileExts={"tap","nc","ncc","cnc","fnc","txt"};
 private int fileExt=0;
 
@@ -244,8 +260,11 @@ millPlunge=prefs.getDouble("MILL_PLUNGE",-0.3);    // mm, for G Code
 millTransit=prefs.getDouble("MILL_TRANSIT",1.0);   // mm, for G Code
 backlash=prefs.getDouble("BACKLASH",0.4);          // mm, for G Code
 doBacklash=prefs.getBoolean("DO_BACKLASH",false);          
-
+GCodeDecimalIsDot=prefs.getBoolean("DECIMAL_IS_DOT",true);    
 fileExt=prefs.getInt("FILE_EXT",0);          
+
+GCodeDecimalIsDot=false; //  Format either 1,000,000.00 (UK) or 1.000.000,00 (FR)
+// This is separate from the display Locale, which will follow the machine default
 
 at =new AffineTransform();
 atG=new AffineTransform();
@@ -284,11 +303,10 @@ jmSettings=new JMenu("Settings");
 jmHelp    =new JMenu("Help");
 
 // Sub-menus of settings
-//final JMenu jmImgSettings =new JMenu("Image Settings");
 final JMenu jmCreate      =new JMenu("Create");
 final JMenu jmOptimise    =new JMenu("Optimisations");
 
-final JMenuItem jmImgSettings=new JMenuItem(new AbstractAction("Image Settings") {
+final JMenuItem jmImgSettings=new JMenuItem(new AbstractAction("PCB Image Settings") {
   private static final long serialVersionUID = 1L;
   public void actionPerformed(ActionEvent e) {
     
@@ -300,7 +318,8 @@ final JMenuItem jmImgSettings=new JMenuItem(new AbstractAction("Image Settings")
     radioGroup.add(copperColourB);
     radioGroup.add(copperColourW);
 
-    JCheckBox checkbox=new JCheckBox("Flip board Left-Right");
+    JCheckBox checkFlip  =new JCheckBox("Flip board Left-Right");
+    //JCheckBox checkRelief=new JCheckBox("Create thermal relief pads");
 
     final JPanel myPanel=new JPanel();
     myPanel.setLayout(new BoxLayout(myPanel,BoxLayout.Y_AXIS));
@@ -308,21 +327,24 @@ final JMenuItem jmImgSettings=new JMenuItem(new AbstractAction("Image Settings")
     myPanel.add(copperColourW);
     myPanel.add(new JLabel("Force image DPI to be (0 = use DPI from image) :"));
     myPanel.add(forceDPIField);
-    myPanel.add(checkbox);
-    checkbox.setSelected(flipped);
+    myPanel.add(checkFlip);
+    //myPanel.add(checkRelief);
+    checkFlip.setSelected(flipped);
+    //checkRelief.setSelected(relieved);
     
     int result=JOptionPane.showConfirmDialog(frame,myPanel,
-               "Image Settings",JOptionPane.OK_CANCEL_OPTION); 
+               "PCB Image Settings",JOptionPane.OK_CANCEL_OPTION); 
     if (result==JOptionPane.OK_OPTION) {
       forceDPI=Integer.parseInt(forceDPIField.getText());
       cuWhite=copperColourW.isSelected();
-      if (flipped!=checkbox.isSelected()) {
+      if (flipped!=checkFlip.isSelected()) {
         flipped=(!flipped);
         board.cleanUp();
         resetImage();
         rescale();
         boardOnly();
       }
+      //relieved=checkRelief.isSelected();
     }
   }
 });
@@ -413,6 +435,23 @@ final JMenuItem jmGSettings=new JMenuItem(new AbstractAction("G Code Settings") 
       radioPanel.add(extensions[i]);
     }
     myPanel.add(radioPanel);
+	
+	/*final JPanel localePanel = new JPanel(); // Possible future option if G-Code uses different formats
+    localePanel.setBorder(BorderFactory.createTitledBorder(
+           BorderFactory.createEtchedBorder(),"GCode number format : Note setting persists between boards "));
+    
+    ButtonGroup localeGroup=new ButtonGroup();
+    JRadioButton [] numberFormat=new JRadioButton[2];
+    numberFormat[0]=new JRadioButton("#,###.##",(GCodeDecimalIsDot));
+    localeGroup.add(numberFormat[0]);
+    localePanel.add(numberFormat[0]);
+    numberFormat[1]=new JRadioButton("#.###,##",(!GCodeDecimalIsDot));
+    localeGroup.add(numberFormat[1]);
+    localePanel.add(numberFormat[1]);
+	
+	JLabel jlabel=new JLabel("*** BEWARE : If this is wrong, machine could move much more than expected");
+    localePanel.add(jlabel);
+    myPanel.add(localePanel);*/
     
     int result=JOptionPane.showConfirmDialog(frame,myPanel,
           "G Code parameters",JOptionPane.OK_CANCEL_OPTION); 
@@ -420,17 +459,20 @@ final JMenuItem jmGSettings=new JMenuItem(new AbstractAction("G Code Settings") 
       plungeRate=Integer.parseInt(plungeRateField.getText());
       millRate=Integer.parseInt(millRateField.getText());
 
-      drillTransit=Double.parseDouble(drillTransitField.getText());
-      drillPlunge=Double.parseDouble(drillPlungeField.getText());
-      millTransit=Double.parseDouble(millTransitField.getText());
-      millPlunge=Double.parseDouble(millPlungeField.getText());
-      backlash=Double.parseDouble(backlashField.getText());
+      try {
+      drillTransit=NumberFormat.getInstance(Locale.getDefault()).parse(drillTransitField.getText()).doubleValue();
+      drillPlunge=NumberFormat.getInstance(Locale.getDefault()).parse(drillPlungeField.getText()).doubleValue();
+      millTransit=NumberFormat.getInstance(Locale.getDefault()).parse(millTransitField.getText()).doubleValue();
+      millPlunge=NumberFormat.getInstance(Locale.getDefault()).parse(millPlungeField.getText()).doubleValue();
+      backlash=NumberFormat.getInstance(Locale.getDefault()).parse(backlashField.getText()).doubleValue();
+	  } catch (ParseException ex) { System.out.println("Attribute Error"); ex.printStackTrace(); System.exit(0);} 
       doBacklash=checkbox.isSelected();
 
       for (int i=0;i<fileExts.length;i++) {
         if (extensions[i].isSelected()) fileExt=i;
       }
-      
+
+      // GCodeDecimalIsDot=numberFormat[0].isSelected();
       prefs.putInt("PLUNGE_RATE",plungeRate); 
       prefs.putInt("MILL_RATE",millRate);
       
@@ -443,6 +485,8 @@ final JMenuItem jmGSettings=new JMenuItem(new AbstractAction("G Code Settings") 
       prefs.putBoolean("DO_BACKLASH",doBacklash); 
 
       prefs.putInt("FILE_EXT",fileExt); 
+      prefs.putBoolean("DECIMAL_IS_DOT",GCodeDecimalIsDot); 
+	  
     }
   }
 });
@@ -613,7 +657,7 @@ JMenuItem tips=new JMenuItem(new AbstractAction("Hints and Tips") {
       "Results are put in a subdirectory with the same name as the image file."+nL+
       ".tap files contain the generated G-Code"+nL+nL+
       "G Code has (0.0,0.0) as top left of image."+nL+nL+
-      "If results look odd, check that copper colour was correctly set."+nL+nL+
+      "*** If results look odd, or run crashes, check that copper colour was correctly set. ***"+nL+nL+
       "Cisolate works from the perspective of a system milling/drilling"+nL+
       "from above.  You may need to use the 'flip' option if your image"+nL+
       "is not from that perspective (e.g. with top and bottom images of"+nL+
@@ -664,7 +708,7 @@ JMenuItem about=new JMenuItem(new AbstractAction("About Cisolate") {
        "Undertakes optimisations of machine tool movements if required.<br>"+"Detailed "+
        "<a href=\"https://oilulio.wordpress.com/2016/01/02/cisolate-pcb-construction/\""+
        ">description</a>"+
-       "<br><br>By Stuart Combes, 2014-2018</body></html>");
+       "<br><br>By Stuart Combes, 2014-2022</body></html>");
 
     ep.addHyperlinkListener(new HyperlinkListener()
     {
@@ -952,7 +996,7 @@ processButton.addActionListener(new ActionListener() {
     
     if (board.edgeIsMixed()) {
       if (JOptionPane.showConfirmDialog(frame,"The image border is neither solid "+nL+
-        "copper nor a complete isolation.  This is likely to result in unexpected "+nL+
+        "copper nor a complete isolation."+nL+"This is likely to result in unexpected "+nL+
         "results.  Cancel?","Problem with board",JOptionPane.YES_NO_OPTION,
         JOptionPane.WARNING_MESSAGE)==JOptionPane.YES_OPTION) 
           return;
@@ -973,6 +1017,7 @@ processButton.addActionListener(new ActionListener() {
     board.millTransit=millTransit;
     board.forceDPI=forceDPI;
     board.doBacklash=doBacklash;
+    board.relieved=relieved;
     board.backlashRad=backlash;
     board.flipped=(flipped?(-1):1);
 
@@ -1034,8 +1079,8 @@ if (map!=null) {
     Node attribute=map.item(j);
     String name=attribute.getNodeName();
     if (name.equals(attrib))  
-      result=Double.parseDouble(attribute.getNodeValue());
-  }
+	  try { result=NumberFormat.getInstance(Locale.getDefault()).parse(attribute.getNodeValue()).doubleValue(); }
+      catch (ParseException e) { System.out.println("Attribute Error"); e.printStackTrace(); System.exit(0);}   }
 }
 return result;
 }

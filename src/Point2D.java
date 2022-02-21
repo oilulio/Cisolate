@@ -34,4 +34,11 @@ public boolean equals(Point2D pt)
     { return (this.x==pt.getX() && this.y==pt.getY()); }
 public boolean equals(int x,int y) 
     { return (this.x==x && this.y==y); }
+    
+public double distance(Point2D point) 
+{
+return Math.sqrt(Math.pow(getX()-point.getX(),2)+
+                 Math.pow(getY()-point.getY(),2));
+  
+}
 }

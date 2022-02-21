@@ -124,7 +124,7 @@ for (pass=0;true;pass++) {
 
   binaryImg=nextBimg;
 
-  /* For animation
+  /* //  For animation
   BufferedImage b = new BufferedImage(width, 
         height, BufferedImage.TYPE_3BYTE_BGR);
   writeBimg(b);
@@ -164,9 +164,62 @@ for (int y=1;y<(height-1);y++) {
     }
   }
 }
-// Now walk from the start points to get routes
-
 routes = new ArrayList<Route2D>();
+
+// Now add the thermal relief cuts.  Intended to allow easier soldering, as
+// soldering to a large area of copper is hard.
+
+// Each is a set of arcs, egually spaced around a drill point at a given
+// radius.  We do this before we destroy the binaryImage[][] because we can
+// use the image to avoid the arcs being drawn if we are close to a cut anyway
+
+if (board.relieved) {
+  int radius=board.xDPI/31;  // pixels
+  for (Point2D d : drills) { 
+    Points2D nearbyDrills=new Points2D();
+    for (Point2D another : drills) {
+      if (!another.equals(d)) {
+        if (d.distance(another)<2.1*radius)
+          nearbyDrills.add(another);
+      }
+    }
+    for (int segments=0;segments<2;segments++) { // Currently only works if segments=2
+      QuantisedCircularArc ca=new QuantisedCircularArc(true,
+                        new Point2D(d.getX(),d.getY()+radius*(2*segments-1)),
+                        new Point2D(d.getX()+radius*(2*segments-1),d.getY()),radius);
+      Route2D route=new Route2D();
+      for (Point2D point : ca) {
+        // Only allow that pixel to be drawn if it is closer to its own drill centre than
+        // to any other and we have a clear run from the drill centre to
+        // a certain factor beyond the pixel.  Prevents arcs cutting the existing traces
+        // and prevents them being wastefully close to the traces.        
+        boolean clear=true;
+        for (Point2D near : nearbyDrills)
+          clear&=(near.distance(point)>radius);
+       
+        Point2D extended=new Point2D(d.getX()+(int)(0.5+1.7*(point.getX()-d.getX())),
+                                     d.getY()+(int)(0.5+1.7*(point.getY()-d.getY())));
+        QuantisedLine ql=new QuantisedLine(d,extended); // centre to +70% behind the arc
+        for (Point2D p : ql) {
+          try {
+            clear&=(!binaryImg[p.getX()][p.getY()]);
+          } catch (ArrayIndexOutOfBoundsException e) { clear=false; /* off edge */ } 
+        }
+        if (clear) route.add(point);  
+        else {
+          if (route.size()>5) { // Keep reasonably sized orphans ...
+            routes.add(route);
+          }
+          route=new Route2D();  // ... and prepare next route        
+        }
+      }
+      if (route.size()>5)
+        routes.add(route);
+    }
+  }
+}
+
+// Now walk from the start points to get routes
 
 for (Point2D point : threeWays) {
   if (board.stop) return;
@@ -200,6 +253,10 @@ if (board.stop) return;
     }
   }
 }
+
+
+
+
 transits=new Lines2D(endPairs());  // For mill route optimisation
 
 // Setup a subset of drill points to assist with board alignment on
