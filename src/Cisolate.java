@@ -31,8 +31,7 @@ import javax.imageio.*;
 import javax.swing.filechooser.FileFilter;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.util.prefs.Preferences;
-import java.util.Observer;
-import java.util.Observable;
+import java.util.concurrent.Flow;
 import java.util.Locale;
 import java.text.NumberFormat;
 import java.text.ParseException;
@@ -105,6 +104,11 @@ Changes in V2.3
  without affecting produced GCode (which is assumed to use US format decimal for comma)
  3. Avoids long comments that can crash some G-Code interpreters
 
+Changes in V2.4
+ 1.  Updated deprecated Observer to use Flow.  Removes potential obsolescence.
+
+
+
 Planned changes
  1.  Option to include 'thermal relief' pad design to ease soldering large areas of 
  copper (some stub code in 2.3)
@@ -112,7 +116,7 @@ Planned changes
 */
 
 private static final long serialVersionUID = 1L;
-public static final String version="2.3";
+public static final String version="2.4";
 
 private static final String nL = System.getProperty("line.separator");
 
@@ -540,7 +544,6 @@ final JMenuItem close=new JMenuItem(new AbstractAction("Close file") {
       properties.setEnabled(false);
       processButton.setBackground(Color.gray);
       processButton.setEnabled(false);
-      board.deleteObservers();  // Important, even though we delete board
       boardOnly();
       board=null;
       boardPanel.repaint();
@@ -554,7 +557,6 @@ JMenuItem load=new JMenuItem(new AbstractAction("Load file") {
   public void actionPerformed(ActionEvent e) {
 
     if (fc.showOpenDialog(frame)==JFileChooser.APPROVE_OPTION) {
-      if (board!=null) board.deleteObservers();  // Important
       board=new Board(fc.getSelectedFile(),frame); 
       boardOnly();
       forceRedraw();
@@ -569,7 +571,7 @@ JMenuItem load=new JMenuItem(new AbstractAction("Load file") {
       resetImage();
       rescale();   
       
-      board.addObserver(new BoardObserver());
+      board.subscribe(new BoardSubscriber());
       board.aChange();
       processButton.repaint();
       JOptionPane.showMessageDialog(frame,"Loaded "+board.imgProperties,
@@ -1268,11 +1270,26 @@ else {
   }*/
 }
 // ----------------------------------------------------------------
-private class BoardObserver implements Observer {
+private class BoardSubscriber implements Flow.Subscriber<Board> {
 
-public void update(Observable obs, Object obj) {
+private Flow.Subscription subscription;
+@Override
+public void onSubscribe(Flow.Subscription subscription) {
+  this.subscription=subscription;
+  this.subscription.request(1);
+}
+@Override
+public void onError(Throwable throwable) {
+  throwable.printStackTrace();
+}
+@Override
+public void onComplete() {
+  System.out.println("Done");
+}
+@Override
+public void onNext(Board obsBoard) {
 
- Board obsBoard=(Board)obs;
+  subscription.request(1); // Needed but not sure why
 
  if (obsBoard==null) return;
 
@@ -1290,7 +1307,7 @@ public void update(Observable obs, Object obj) {
 
    JOptionPane.showMessageDialog(frame,obsBoard.log,
       "Cisolate : Run summary",JOptionPane.INFORMATION_MESSAGE); 
-  }
+ }
 
  int x0,y0,x0G,y0G;
 

@@ -29,10 +29,11 @@ import javax.imageio.*;
 import javax.imageio.metadata.*;
 import javax.imageio.stream.*;
 import java.util.concurrent.*;
+import java.util.concurrent.SubmissionPublisher;
 import java.text.NumberFormat;
 import java.text.ParseException;
 
-class Board extends Observable implements Runnable {
+class Board extends SubmissionPublisher<Board> implements Runnable {
 
 // Main object within Cisolate program, represents a Board and actions upon it
 // but excludes GUI, which gets Observer notifications
@@ -329,11 +330,7 @@ if (annealPair.running()) {
 private void updateDuke() 
     { progressBarDuke.setValue(Route2D.noSolved());}
 // ---------------------------------------------------------------
-public void aChange() 
-{ 
-setChanged();       // Time to update GUI
-notifyObservers(); 
-}
+public void aChange() { submit(this); }
 // ---------------------------------------------------------------
 public static BufferedImage makeImage(BufferedImage source) {
   BufferedImage b = new BufferedImage(source.getWidth(), 
@@ -656,8 +653,7 @@ public void run()
 stop=false;
 cleanUp();
 
-setChanged();       // Time to update GUI
-notifyObservers();
+aChange(); // Time to update GUI
 
 img=makeImage(board);      // Needed after cancel
 writeFile("board",board);  // Echo startpoint out for the record
@@ -802,8 +798,7 @@ writeFile("drill",drill);
 
 if (!smoothEtch && etch>0) drawEtch(g2d); // Can have it now if not smoothed
 
-setChanged();       // Time to update GUI
-notifyObservers();
+aChange();  // Time to update GUI
 
 if (stop) return;
 System.out.println("\n\n"+skeleton.drills.size()+" drill points found");
@@ -999,8 +994,7 @@ if (!stop && drillCode) {
   drillPath=makeImage(img);
   writeFile("drillPaths",drillPath);
 }
-setChanged();       // Time to update GUI
-notifyObservers();
+aChange();  // Time to update GUI
 
 // ------------------------------------------------------------
 // Wait for the milling optimisation to finish - we're stuck without it
@@ -1154,8 +1148,7 @@ if (!raw && millCode) drawDuke(g2d);
 // ------------------------------------------------------------
 if (win!=null) win.setVisible(false);
 win=null;
-setChanged();       // Time to update GUI
-notifyObservers();
+aChange();  // Time to update GUI
 
 // Do a sanity check on the DPI based on looking for ICs with 0.1" leg spacing
 Points2D [] pitches=detectPitch(skeleton.drills);
@@ -1168,8 +1161,8 @@ pitch=makeImage(img);
 writeFile("pitches",pitch);
 
 complete=true;
-setChanged();       // Time to update GUI
-notifyObservers();
+
+aChange();  // Time to update GUI
 
 System.out.println(nL+"All done at "+new Date());
 System.out.println(nL+"-------------------SUMMARY--------------------");
